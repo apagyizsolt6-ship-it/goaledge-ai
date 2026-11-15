@@ -1,7 +1,7 @@
 name: goaledge_ai
-description: GoalEdge AI - Dixon-Coles & SportAPI.ai sportanalitikai alkalmazás
+description: GoalEdge AI v7.0 - Quant & Strategy Lab (Dixon-Coles, SGP & SportAPI.ai)
 publish_to: 'none'
-version: 5.0.0+5
+version: 7.0.0+7
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
