@@ -130,32 +130,84 @@ class PoissonEngine {
 // 2. ADATMODELLEK
 // ==========================================
 
+class TeamStandingInfo {
+  final int teamId;
+  final String teamName;
+  final int position;
+  final int played;
+  final int won;
+  final int draw;
+  final int lost;
+  final int goalsFor;
+  final int goalsAgainst;
+  final int points;
+  final List> form;
+
+  TeamStandingInfo({
+    required this.teamId,
+    required this.teamName,
+    required this.position,
+    required this.played,
+    required this.won,
+    required this.draw,
+    required this.lost,
+    required this.goalsFor,
+    required this.goalsAgainst,
+    required this.points,
+    required this.form,
+  });
+
+  double get avgGoalsFor => played > 0 ? goalsFor / played : 1.35;
+  double get avgGoalsAgainst => played > 0 ? goalsAgainst / played : 1.25;
+}
+
 class MatchPick {
   final String id;
+  final int? fixtureId;
+  final int? leagueId;
+  final int? homeId;
+  final int? awayId;
   final String league;
+  final String leagueZone;
   final String kickoff;
-  final String statusLabel;
+  final String status; // Scheduled, LIVE, FT, AET, PENS, Postponed
+  final String? minute;
+  final int? homeScore;
+  final int? awayScore;
   final String homeTeam;
   final String awayTeam;
-  final String market;
-  final String trendSummary;
-  final String trendCategory;
-  final double modelProb;
-  final double marketOdds;
-  final List<double> oddsHistory;
-  final double homeXg;
-  final double awayXg;
-  final List<bool> last8Trend;
+  String market;
+  String marketCode; // 'home', 'over25', 'btts'
+  String trendSummary;
+  String trendCategory;
+  double modelProb;
+  double marketOdds;
+  List<double> oddsHistory;
+  double homeXg;
+  double awayXg;
+  List<bool> last6Trend;
+  int? homePos;
+  int? awayPos;
+  bool hasStandingData;
   bool isWatched;
 
   MatchPick({
     required this.id,
+    this.fixtureId,
+    this.leagueId,
+    this.homeId,
+    this.awayId,
     required this.league,
+    this.leagueZone = '',
     required this.kickoff,
-    this.statusLabel = 'NS',
+    this.status = 'Scheduled',
+    this.minute,
+    this.homeScore,
+    this.awayScore,
     required this.homeTeam,
     required this.awayTeam,
     required this.market,
+    this.marketCode = 'over25',
     required this.trendSummary,
     required this.trendCategory,
     required this.modelProb,
@@ -163,19 +215,50 @@ class MatchPick {
     required this.oddsHistory,
     required this.homeXg,
     required this.awayXg,
-    required this.last8Trend,
+    required this.last6Trend,
+    this.homePos,
+    this.awayPos,
+    this.hasStandingData = false,
     this.isWatched = false,
   });
 
   double get impliedProb => 1.0 / marketOdds;
   double get edgePercent => (modelProb - impliedProb) * 100.0;
   PoissonResult get poisson => PoissonEngine.calculate(homeXg, awayXg);
+  bool get isLive => status == 'LIVE';
+  bool get isFinished => status == 'FT' || status == 'AET' || status == 'PENS';
+}
+
+class FixtureDetailData {
+  final String? stadium;
+  final String? city;
+  final String? homeCoach;
+  final String? awayCoach;
+  final int? htHome;
+  final int? htAway;
+  final List> events;
+  final Map<String, dynamic>? homeStats;
+  final Map<String, dynamic>? awayStats;
+
+  FixtureDetailData({
+    this.stadium,
+    this.city,
+    this.homeCoach,
+    this.awayCoach,
+    this.htHome,
+    this.htAway,
+    this.events = const [],
+    this.homeStats,
+    this.awayStats,
+  });
 }
 
 class BetRecord {
   final String id;
+  final int? fixtureId;
   final String matchTitle;
   final String market;
+  final String marketCode;
   final double odds;
   final double stake;
   final String status; // 'pending', 'won', 'lost'
@@ -183,8 +266,10 @@ class BetRecord {
 
   BetRecord({
     required this.id,
+    this.fixtureId,
     required this.matchTitle,
     required this.market,
+    this.marketCode = 'over25',
     required this.odds,
     required this.stake,
     required this.status,
@@ -199,8 +284,10 @@ class BetRecord {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'fixtureId': fixtureId,
         'matchTitle': matchTitle,
         'market': market,
+        'marketCode': marketCode,
         'odds': odds,
         'stake': stake,
         'status': status,
@@ -209,8 +296,10 @@ class BetRecord {
 
   factory BetRecord.fromJson(Map<String, dynamic> json) => BetRecord(
         id: json['id'] ?? '',
+        fixtureId: (json['fixtureId'] as num?)?.toInt(),
         matchTitle: json['matchTitle'] ?? '',
         market: json['market'] ?? '',
+        marketCode: json['marketCode'] ?? 'over25',
         odds: (json['odds'] as num?)?.toDouble() ?? 1.80,
         stake: (json['stake'] as num?)?.toDouble() ?? 1000.0,
         status: json['status'] ?? 'pending',
@@ -219,7 +308,7 @@ class BetRecord {
 }
 
 // ==========================================
-// 3. SPORTAPI.AI KLIENS ÉS PARSER
+// 3. SPORTAPI.AI HIVATALOS KLIENS
 // ==========================================
 
 class SportApiResponse {
@@ -228,6 +317,7 @@ class SportApiResponse {
   final List<MatchPick> matches;
   final String rawPreview;
   final String message;
+  final String? rateLimitRemaining;
 
   SportApiResponse({
     required this.success,
@@ -235,89 +325,63 @@ class SportApiResponse {
     required this.matches,
     required this.rawPreview,
     required this.message,
+    this.rateLimitRemaining,
   });
 }
 
 class SportApiService {
-  static String _extractName(dynamic raw, String fallback) {
-    if (raw == null) return fallback;
-    if (raw is String && raw.trim().isNotEmpty) return raw.trim();
-    if (raw is Map) {
-      final candidate = raw['name'] ?? raw['title'] ?? raw['short_name'] ?? raw['team_name'];
-      if (candidate != null && candidate.toString().trim().isNotEmpty) {
-        return candidate.toString().trim();
-      }
-    }
-    return fallback;
+  static const String defaultBaseUrl = 'https://sportapi.ai/api';
+  static final Map<int, Map<int, TeamStandingInfo>> _standingsCache = {};
+
+  static String _formatDate(DateTime dt) {
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
-  static double? _extractDouble(dynamic map, List<String> keys) {
-    if (map is! Map) return null;
-    for (final k in keys) {
-      final val = map[k];
-      if (val is num) return val.toDouble();
-      if (val is String) {
-        final parsed = double.tryParse(val.replaceAll(',', '.'));
-        if (parsed != null) return parsed;
-      }
-    }
-    return null;
-  }
-
-  static String _formatKickoff(dynamic item, String dayLabel) {
-    if (item is! Map) return dayLabel;
-    final rawTime = item['start_time'] ??
-        item['kickoff'] ??
-        item['date'] ??
-        item['start_date'] ??
-        item['fixture']?['date'];
-
-    if (rawTime is String) {
-      final isoMatch = RegExp(r'T(\d{2}:\d{2})').firstMatch(rawTime);
-      if (isoMatch != null) return '$dayLabel ${isoMatch.group(1)}';
-      final spaceMatch = RegExp(r'\s(\d{2}:\d{2})').firstMatch(rawTime);
-      if (spaceMatch != null) return '$dayLabel ${spaceMatch.group(1)}';
-    }
-
-    final ts = item['startTimestamp'] ?? item['timestamp'] ?? item['start_timestamp'];
-    if (ts is num) {
-      final millis = ts > 10000000000 ? ts.toInt() : (ts.toInt() * 1000);
-      final dt = DateTime.fromMillisecondsSinceEpoch(millis).toLocal();
-      final hh = dt.hour.toString().padLeft(2, '0');
-      final mm = dt.minute.toString().padLeft(2, '0');
-      return '$dayLabel $hh:$mm';
-    }
-    return dayLabel;
-  }
-
-  static Future<SportApiResponse> fetchMatches({
+  static Future<SportApiResponse> fetchFixturesByDate({
     required String baseUrl,
-    required String endpoint,
     required String apiKey,
     required DateTime targetDate,
     required String dayLabel,
     required List<String> watchedIds,
   }) async {
     final cleanBase = baseUrl.trim().replaceAll(RegExp(r'/$'), '');
-    final cleanEndpoint = endpoint.trim().startsWith('/') ? endpoint.trim() : '/${endpoint.trim()}';
-    final dateStr =
-        '${targetDate.year}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}';
-
-    final separator = cleanEndpoint.contains('?') ? '&' : '?';
-    final uri = Uri.parse('$cleanBase$cleanEndpoint${separator}date=$dateStr');
+    final dateStr = _formatDate(targetDate);
+    final uri = Uri.parse('$cleanBase/fixtures/date/$dateStr');
 
     try {
       final response = await http.get(
         uri,
         headers: {
           'Accept': 'application/json',
-          'Authorization': 'Bearer ${apiKey.trim()}',
-          'x-api-key': apiKey.trim(),
+          'X-Api-Key': apiKey.trim(),
         },
       ).timeout(const Duration(seconds: 15));
 
+      final remaining = response.headers['x-ratelimit-remaining'];
       final bodyText = utf8.decode(response.bodyBytes, allowMalformed: true);
-      final preview = bodyText.length > 320 ? '${bodyText.substring(0, 320)}...' : bodyText;
+      final preview = bodyText.length > 350 ? '${bodyText.substring(0, 350)}...' : bodyText;
+
+      if (response.statusCode == 401) {
+        return SportApiResponse(
+          success: false,
+          statusCode: 401,
+          matches: [],
+          rawPreview: preview,
+          message: '401 Hibás vagy hiányzó X-Api-Key kulcs!',
+          rateLimitRemaining: remaining,
+        );
+      }
+
+      if (response.statusCode == 429) {
+        return SportApiResponse(
+          success: false,
+          statusCode: 429,
+          matches: [],
+          rawPreview: preview,
+          message: '429 Elérted a napi/havi lekérési limitet!',
+          rateLimitRemaining: remaining,
+        );
+      }
 
       if (response.statusCode != 200) {
         return SportApiResponse(
@@ -325,139 +389,125 @@ class SportApiService {
           statusCode: response.statusCode,
           matches: [],
           rawPreview: preview,
-          message: 'HTTP ${response.statusCode} hiba a(z) $cleanEndpoint végponton.',
+          message: 'HTTP ${response.statusCode} hiba ($uri)',
+          rateLimitRemaining: remaining,
         );
       }
 
       final decoded = jsonDecode(bodyText);
-      List<dynamic> rawList = [];
+      final List<dynamic> dataList = (decoded is Map && decoded['data'] is List) ? decoded['data'] : [];
 
-      if (decoded is List) {
-        rawList = decoded;
-      } else if (decoded is Map) {
-        final container = decoded['data'] ??
-            decoded['matches'] ??
-            decoded['events'] ??
-            decoded['fixtures'] ??
-            decoded['response'] ??
-            decoded['results'];
-        if (container is List) {
-          rawList = container;
-        } else if (container is Map && container['matches'] is List) {
-          rawList = container['matches'];
-        }
-      }
-
-      if (rawList.isEmpty) {
+      if (dataList.isEmpty) {
         return SportApiResponse(
           success: true,
           statusCode: 200,
           matches: [],
           rawPreview: preview,
-          message: 'Kapcsolat OK (200), de 0 meccs található erre a napra ($dateStr).',
+          message: 'Kapcsolat OK (200), de 0 meccs van ezen a napon ($dateStr).',
+          rateLimitRemaining: remaining,
         );
       }
 
+      // Kiemelt ligák előresorolása (Premier League: 24, La Liga: 1, stb.)
+      const topLeagueNames = {
+        'Premier League',
+        'Spanish La Liga',
+        'La Liga',
+        'Serie A',
+        'Bundesliga',
+        'Ligue 1',
+        'UEFA Champions League',
+        'UEFA Europa League',
+        'NB I',
+        'OTP Bank Liga',
+      };
+
+      final sortedRaw = List>.from(
+        dataList.whereType>(),
+      );
+
+      sortedRaw.sort((a, b) {
+        final aLeague = (a['league_name'] ?? '').toString();
+        final bLeague = (b['league_name'] ?? '').toString();
+        final aPrio = topLeagueNames.contains(aLeague) ? 0 : 1;
+        final bPrio = topLeagueNames.contains(bLeague) ? 0 : 1;
+        if (aPrio != bPrio) return aPrio.compareTo(bPrio);
+        return (a['datetime'] ?? '').toString().compareTo((b['datetime'] ?? '').toString());
+      });
+
       final List<MatchPick> parsed = [];
-      for (int i = 0; i < rawList.length && parsed.length < 30; i++) {
-        final item = rawList[i];
-        if (item is! Map) continue;
+      for (final item in sortedRaw.take(40)) {
+        final fixtureId = (item['id'] as num?)?.toInt() ?? 0;
+        final leagueId = (item['league_id'] as num?)?.toInt();
+        final homeId = (item['home_id'] as num?)?.toInt();
+        final awayId = (item['away_id'] as num?)?.toInt();
+        final matchId = 'sportapi_$fixtureId';
 
-        final rawId = (item['id'] ?? item['match_id'] ?? item['event_id'] ?? item['fixture']?['id'] ?? i).toString();
-        final matchId = 'sportapi_$rawId';
+        final homeTeam = (item['home_team'] ?? 'Hazai').toString();
+        final awayTeam = (item['away_team'] ?? 'Vendég').toString();
+        final leagueName = (item['league_name'] ?? 'Bajnokság').toString();
+        final leagueZone = (item['league_zone'] ?? '').toString();
+        final status = (item['status'] ?? 'Scheduled').toString();
+        final minute = item['minute']?.toString();
+        final homeScore = (item['home_score'] as num?)?.toInt();
+        final awayScore = (item['away_score'] as num?)?.toInt();
 
-        final homeTeam = _extractName(
-          item['home_team'] ?? item['homeTeam'] ?? item['teams']?['home'] ?? item['home'],
-          'Hazai csapat',
-        );
-        final awayTeam = _extractName(
-          item['away_team'] ?? item['awayTeam'] ?? item['teams']?['away'] ?? item['away'],
-          'Vendég csapat',
-        );
-        final league = _extractName(
-          item['league'] ?? item['tournament'] ?? item['competition'] ?? item['category'],
-          'Bajnokság',
-        );
-
-        final kickoff = _formatKickoff(item, dayLabel);
-
-        // Valódi xG vagy modellezett xG kiolvasása
-        final seed = rawId.hashCode ^ homeTeam.hashCode;
-        final rng = math.Random(seed);
-        final apiHomeXg = _extractDouble(item, ['home_xg', 'xg_home']) ??
-            _extractDouble(item['xg'], ['home', '1']) ??
-            (1.15 + rng.nextDouble() * 1.25);
-        final apiAwayXg = _extractDouble(item, ['away_xg', 'xg_away']) ??
-            _extractDouble(item['xg'], ['away', '2']) ??
-            (0.85 + rng.nextDouble() * 1.10);
-
-        final poisson = PoissonEngine.calculate(apiHomeXg, apiAwayXg);
-
-        // Valódi szorzók kiolvasása, ha a SportAPI.ai visszaadja az odds mezőt
-        final oddsObj = item['odds'] ?? item['markets'] ?? item['bookmakers'];
-        final homeOdds = _extractDouble(oddsObj, ['1', 'home', 'home_win', 'match_winner_home']);
-        final over25Odds = _extractDouble(oddsObj, ['over_2_5', 'over25', 'o25', 'goals_over_2_5']);
-        final bttsOdds = _extractDouble(oddsObj, ['btts_yes', 'btts', 'both_teams_to_score']);
-
-        String selectedMarket;
-        double selectedProb;
-        double selectedOdds;
-        String category;
-
-        if (over25Odds != null && over25Odds > 1.15) {
-          selectedMarket = '2.5 gól felett';
-          selectedProb = poisson.over25;
-          selectedOdds = over25Odds;
-          category = 'Gólok / BTTS';
-        } else if (bttsOdds != null && bttsOdds > 1.15) {
-          selectedMarket = 'Mindkét csapat szerez gólt (BTTS)';
-          selectedProb = poisson.btts;
-          selectedOdds = bttsOdds;
-          category = 'Gólok / BTTS';
-        } else if (homeOdds != null && homeOdds > 1.15) {
-          selectedMarket = 'Hazai győzelem (1)';
-          selectedProb = poisson.homeWin;
-          selectedOdds = homeOdds;
-          category = 'xG eltérés';
-        } else {
-          // Ha az adott csomag nem küld oddsot, a Poisson-modell számol reális piaci szorzót
-          final pickOver = poisson.over25 >= poisson.homeWin;
-          selectedMarket = pickOver ? '2.5 gól felett' : 'Hazai győzelem (1)';
-          selectedProb = pickOver ? poisson.over25 : poisson.homeWin;
-          final fair = 1.0 / selectedProb;
-          selectedOdds = double.parse((fair * 1.08).clamp(1.35, 3.80).toStringAsFixed(2));
-          category = pickOver ? 'Gólok / BTTS' : 'xG eltérés';
+        // CET/CEST időpont formázása a dokumentáció alapján
+        String timeStr = dayLabel;
+        final dtStr = (item['datetime'] ?? '').toString();
+        if (dtStr.length >= 16) {
+          timeStr = '$dayLabel ${dtStr.substring(11, 16)}';
         }
 
-        final apiTrend = item['trend'] ?? item['insight'] ?? item['prediction_text'];
-        final trendText = (apiTrend is String && apiTrend.trim().isNotEmpty)
-            ? apiTrend.trim()
-            : 'SportAPI.ai + Poisson elemzés: várható összgól ${(apiHomeXg + apiAwayXg).toStringAsFixed(2)}, BTTS esély ${(poisson.btts * 100).round()}%.';
+        // Kezdeti Poisson becslés (amelyet a tabella betöltése azonnal pontosít!)
+        final rng = math.Random(fixtureId);
+        double hXg = 1.25 + (rng.nextDouble() * 0.95);
+        double aXg = 0.95 + (rng.nextDouble() * 0.85);
+        int? homePos;
+        int? awayPos;
+        bool hasStandings = false;
+        List<bool> trendList = List.generate(6, (_) => rng.nextDouble() > 0.3);
 
-        parsed.add(
-          MatchPick(
-            id: matchId,
-            league: league,
-            kickoff: kickoff,
-            homeTeam: homeTeam,
-            awayTeam: awayTeam,
-            market: selectedMarket,
-            trendSummary: trendText,
-            trendCategory: category,
-            modelProb: selectedProb,
-            marketOdds: selectedOdds,
-            oddsHistory: [
-              double.parse((selectedOdds + 0.14).toStringAsFixed(2)),
-              double.parse((selectedOdds + 0.08).toStringAsFixed(2)),
-              double.parse((selectedOdds + 0.03).toStringAsFixed(2)),
-              selectedOdds,
-            ],
-            homeXg: double.parse(apiHomeXg.toStringAsFixed(2)),
-            awayXg: double.parse(apiAwayXg.toStringAsFixed(2)),
-            last8Trend: List.generate(8, (_) => rng.nextDouble() > 0.25),
-            isWatched: watchedIds.contains(matchId),
-          ),
+        // Ha már gyorsítótárban van a liga tabellája, azonnal valódi adatokból számolunk!
+        if (leagueId != null && _standingsCache.containsKey(leagueId)) {
+          final table = _standingsCache[leagueId]!;
+          final hInfo = homeId != null ? table[homeId] : null;
+          final aInfo = awayId != null ? table[awayId] : null;
+          if (hInfo != null && aInfo != null && hInfo.played > 0 && aInfo.played > 0) {
+            hXg = ((hInfo.avgGoalsFor + aInfo.avgGoalsAgainst) / 2.0 * 1.12).clamp(0.45, 3.6);
+            aXg = ((aInfo.avgGoalsFor + hInfo.avgGoalsAgainst) / 2.0 * 0.94).clamp(0.35, 3.2);
+            homePos = hInfo.position;
+            awayPos = aInfo.position;
+            hasStandings = true;
+            trendList = _extractFormTrend(hInfo, aInfo);
+          }
+        }
+
+        final pick = _buildPickFromXg(
+          id: matchId,
+          fixtureId: fixtureId,
+          leagueId: leagueId,
+          homeId: homeId,
+          awayId: awayId,
+          league: leagueName,
+          leagueZone: leagueZone,
+          kickoff: timeStr,
+          status: status,
+          minute: minute,
+          homeScore: homeScore,
+          awayScore: awayScore,
+          homeTeam: homeTeam,
+          awayTeam: awayTeam,
+          homeXg: hXg,
+          awayXg: aXg,
+          last6Trend: trendList,
+          homePos: homePos,
+          awayPos: awayPos,
+          hasStandingData: hasStandings,
+          isWatched: watchedIds.contains(matchId),
         );
+
+        parsed.add(pick);
       }
 
       return SportApiResponse(
@@ -465,7 +515,8 @@ class SportApiService {
         statusCode: 200,
         matches: parsed,
         rawPreview: preview,
-        message: '${parsed.length} meccs sikeresen betöltve a SportAPI.ai-ról!',
+        message: '${parsed.length} meccs betöltve (${dateStr})!',
+        rateLimitRemaining: remaining,
       );
     } catch (e) {
       return SportApiResponse(
@@ -473,8 +524,242 @@ class SportApiService {
         statusCode: 0,
         matches: [],
         rawPreview: e.toString(),
-        message: 'Hálózati vagy formátum hiba: $e',
+        message: 'Hálózati hiba: $e',
       );
+    }
+  }
+
+  static List<bool> _extractFormTrend(TeamStandingInfo home, TeamStandingInfo away) {
+    final List<bool> hits = [];
+    for (final f in home.form.take(3)) {
+      final hg = (f['home_score'] as num?)?.toInt() ?? 0;
+      final ag = (f['away_score'] as num?)?.toInt() ?? 0;
+      hits.add((hg + ag) >= 2);
+    }
+    for (final f in away.form.take(3)) {
+      final hg = (f['home_score'] as num?)?.toInt() ?? 0;
+      final ag = (f['away_score'] as num?)?.toInt() ?? 0;
+      hits.add((hg + ag) >= 2);
+    }
+    while (hits.length < 6) {
+      hits.add(true);
+    }
+    return hits.take(6).toList();
+  }
+
+  static MatchPick _buildPickFromXg({
+    required String id,
+    int? fixtureId,
+    int? leagueId,
+    int? homeId,
+    int? awayId,
+    required String league,
+    required String leagueZone,
+    required String kickoff,
+    required String status,
+    String? minute,
+    int? homeScore,
+    int? awayScore,
+    required String homeTeam,
+    required String awayTeam,
+    required double homeXg,
+    required double awayXg,
+    required List<bool> last6Trend,
+    int? homePos,
+    int? awayPos,
+    required bool hasStandingData,
+    required bool isWatched,
+  }) {
+    final poisson = PoissonEngine.calculate(homeXg, awayXg);
+
+    String market;
+    String marketCode;
+    double prob;
+    String category;
+
+    if (poisson.homeWin >= 0.56) {
+      market = 'Hazai győzelem (1)';
+      marketCode = 'home';
+      prob = poisson.homeWin;
+      category = 'Tabella & Forma';
+    } else if (poisson.over25 >= 0.55) {
+      market = '2.5 gól felett';
+      marketCode = 'over25';
+      prob = poisson.over25;
+      category = 'Gólok / BTTS';
+    } else if (poisson.btts >= 0.54) {
+      market = 'Mindkét csapat szerez gólt (BTTS)';
+      marketCode = 'btts';
+      prob = poisson.btts;
+      category = 'Gólok / BTTS';
+    } else {
+      market = 'Hazai győzelem (1)';
+      marketCode = 'home';
+      prob = poisson.homeWin;
+      category = 'xG eltérés';
+    }
+
+    final fairOdds = 1.0 / prob;
+    final marketOdds = double.parse((fairOdds * 1.08).clamp(1.30, 4.20).toStringAsFixed(2));
+
+    String summary;
+    if (hasStandingData && homePos != null && awayPos != null) {
+      summary =
+          'Tabella: $homePos. hely vs $awayPos. hely • Valós gólátlag alapú xG: ${homeXg.toStringAsFixed(2)} – ${awayXg.toStringAsFixed(2)} (BTTS: ${(poisson.btts * 100).round()}%).';
+    } else {
+      summary =
+          'Poisson-modell: várható összgól ${(homeXg + awayXg).toStringAsFixed(2)}, 2.5+ gól esély ${(poisson.over25 * 100).round()}%, BTTS ${(poisson.btts * 100).round()}%.';
+    }
+
+    return MatchPick(
+      id: id,
+      fixtureId: fixtureId,
+      leagueId: leagueId,
+      homeId: homeId,
+      awayId: awayId,
+      league: league,
+      leagueZone: leagueZone,
+      kickoff: kickoff,
+      status: status,
+      minute: minute,
+      homeScore: homeScore,
+      awayScore: awayScore,
+      homeTeam: homeTeam,
+      awayTeam: awayTeam,
+      market: market,
+      marketCode: marketCode,
+      trendSummary: summary,
+      trendCategory: category,
+      modelProb: prob,
+      marketOdds: marketOdds,
+      oddsHistory: [
+        double.parse((marketOdds + 0.14).toStringAsFixed(2)),
+        double.parse((marketOdds + 0.08).toStringAsFixed(2)),
+        double.parse((marketOdds + 0.03).toStringAsFixed(2)),
+        marketOdds,
+      ],
+      homeXg: double.parse(homeXg.toStringAsFixed(2)),
+      awayXg: double.parse(awayXg.toStringAsFixed(2)),
+      last6Trend: last6Trend,
+      homePos: homePos,
+      awayPos: awayPos,
+      hasStandingData: hasStandingData,
+      isWatched: isWatched,
+    );
+  }
+
+  static Future> fetchStandings({
+    required String baseUrl,
+    required String apiKey,
+    required int leagueId,
+  }) async {
+    if (_standingsCache.containsKey(leagueId)) {
+      return _standingsCache[leagueId]!;
+    }
+
+    final cleanBase = baseUrl.trim().replaceAll(RegExp(r'/$'), '');
+    final uri = Uri.parse('$cleanBase/standings/$leagueId');
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {
+          'Accept': 'application/json',
+          'X-Api-Key': apiKey.trim(),
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true));
+        final List<dynamic> rows = (decoded is Map && decoded['data'] is List) ? decoded['data'] : [];
+        final Map<int, TeamStandingInfo> map = {};
+
+        for (final row in rows) {
+          if (row is! Map) continue;
+          final teamObj = row['team'];
+          final teamId = (teamObj is Map ? (teamObj['id'] as num?)?.toInt() : null) ?? 0;
+          if (teamId == 0) continue;
+
+          final formList = (row['form'] is List)
+              ? List>.from((row['form'] as List).whereType>())
+              : >[];
+
+          map[teamId] = TeamStandingInfo(
+            teamId: teamId,
+            teamName: (teamObj is Map ? teamObj['name'] : 'Csapat').toString(),
+            position: (row['position'] as num?)?.toInt() ?? 0,
+            played: (row['played'] as num?)?.toInt() ?? 0,
+            won: (row['won'] as num?)?.toInt() ?? 0,
+            draw: (row['draw'] as num?)?.toInt() ?? 0,
+            lost: (row['lost'] as num?)?.toInt() ?? 0,
+            goalsFor: (row['goals_for'] as num?)?.toInt() ?? 0,
+            goalsAgainst: (row['goals_against'] as num?)?.toInt() ?? 0,
+            points: (row['points'] as num?)?.toInt() ?? 0,
+            form: formList,
+          );
+        }
+
+        if (map.isNotEmpty) {
+          _standingsCache[leagueId] = map;
+        }
+        return map;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static Future<FixtureDetailData?> fetchFixtureDetails({
+    required String baseUrl,
+    required String apiKey,
+    required int fixtureId,
+  }) async {
+    final cleanBase = baseUrl.trim().replaceAll(RegExp(r'/$'), '');
+    final headers = {
+      'Accept': 'application/json',
+      'X-Api-Key': apiKey.trim(),
+    };
+
+    try {
+      final results = await Future.wait([
+        http.get(Uri.parse('$cleanBase/fixtures/$fixtureId'), headers: headers).timeout(const Duration(seconds: 10)),
+        http.get(Uri.parse('$cleanBase/fixtures/$fixtureId/stats'), headers: headers).timeout(const Duration(seconds: 10)),
+      ]);
+
+      Map<String, dynamic>? fixtureObj;
+      if (results[0].statusCode == 200) {
+        final d0 = jsonDecode(utf8.decode(results[0].bodyBytes, allowMalformed: true));
+        if (d0 is Map && d0['fixture'] is Map<String, dynamic>) {
+          fixtureObj = d0['fixture'];
+        }
+      }
+
+      Map<String, dynamic>? homeStats;
+      Map<String, dynamic>? awayStats;
+      if (results[1].statusCode == 200) {
+        final d1 = jsonDecode(utf8.decode(results[1].bodyBytes, allowMalformed: true));
+        if (d1 is Map && d1['available'] == true && d1['data'] is Map) {
+          homeStats = d1['data']['home'] as Map<String, dynamic>?;
+          awayStats = d1['data']['away'] as Map<String, dynamic>?;
+        }
+      }
+
+      final eventsList = (fixtureObj?['events'] is List)
+          ? List>.from((fixtureObj!['events'] as List).whereType>())
+          : >[];
+
+      return FixtureDetailData(
+        stadium: fixtureObj?['home_stadium']?.toString(),
+        city: fixtureObj?['home_city']?.toString(),
+        homeCoach: fixtureObj?['home_coach']?.toString(),
+        awayCoach: fixtureObj?['away_coach']?.toString(),
+        htHome: (fixtureObj?['ht_home'] as num?)?.toInt(),
+        htAway: (fixtureObj?['ht_away'] as num?)?.toInt(),
+        events: eventsList,
+        homeStats: homeStats,
+        awayStats: awayStats,
+      );
+    } catch (_) {
+      return null;
     }
   }
 }
@@ -497,9 +782,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   bool _isLiveMode = false;
 
   String _apiKey = '';
-  String _baseUrl = 'https://api.sportapi.ai/v1';
-  String _endpoint = '/football/matches';
+  String _baseUrl = SportApiService.defaultBaseUrl;
   String _lastApiStatus = 'Még nem futott élő lekérés.';
+  String? _rateLimitRemaining;
 
   double _bankroll = 50000;
   List<MatchPick> _matches = [];
@@ -513,84 +798,74 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
   List<MatchPick> _buildDemoMatches() {
-    final m1 = MatchPick(
-      id: 'm1',
-      league: 'Premier League',
-      kickoff: 'Ma 18:30',
-      homeTeam: 'Arsenal',
-      awayTeam: 'Aston Villa',
-      market: 'Mindkét csapat szerez gólt (BTTS)',
-      trendSummary: 'Az utolsó 8 bajnoki meccsből 7-szer mindkét fél betalált, magas támadó xG-mutatókkal.',
-      trendCategory: 'Gólok / BTTS',
-      modelProb: PoissonEngine.calculate(2.15, 1.48).btts,
-      marketOdds: 1.72,
-      oddsHistory: [1.88, 1.84, 1.80, 1.76, 1.72],
-      homeXg: 2.15,
-      awayXg: 1.48,
-      last8Trend: [true, true, true, false, true, true, true, true],
-      isWatched: true,
-    );
-
-    final m2 = MatchPick(
-      id: 'm2',
-      league: 'NB I',
-      kickoff: 'Ma 19:45',
-      homeTeam: 'Ferencváros',
-      awayTeam: 'Paksi FC',
-      market: '2.5 gól felett',
-      trendSummary: 'A Paks idegenbeli meccsein 3.4-es a gólátlag, az FTC hazai xG-je 2.35.',
-      trendCategory: 'Gólok / BTTS',
-      modelProb: PoissonEngine.calculate(2.35, 1.32).over25,
-      marketOdds: 1.65,
-      oddsHistory: [1.78, 1.75, 1.70, 1.68, 1.65],
-      homeXg: 2.35,
-      awayXg: 1.32,
-      last8Trend: [true, true, true, true, false, true, true, true],
-      isWatched: true,
-    );
-
-    final m3 = MatchPick(
-      id: 'm3',
-      league: 'La Liga',
-      kickoff: 'Ma 21:00',
-      homeTeam: 'Real Sociedad',
-      awayTeam: 'Villarreal',
-      market: 'Hazai győzelem (1)',
-      trendSummary: 'xG-alulteljesítés: a Sociedad 2.1-es várható gólátlag mellett csak 1 gólt lőtt az elmúlt 2 meccsen.',
-      trendCategory: 'xG eltérés',
-      modelProb: PoissonEngine.calculate(1.98, 1.05).homeWin,
-      marketOdds: 2.15,
-      oddsHistory: [2.35, 2.28, 2.22, 2.18, 2.15],
-      homeXg: 1.98,
-      awayXg: 1.05,
-      last8Trend: [true, false, true, true, true, false, true, true],
-    );
-
-    final m4 = MatchPick(
-      id: 'm4',
-      league: 'Bajnokok Ligája',
-      kickoff: 'Holnap 21:00',
-      homeTeam: 'Bayer Leverkusen',
-      awayTeam: 'Inter',
-      market: '9.5 szöglet felett',
-      trendSummary: 'A Leverkusen utolsó 8 hazai meccsén átlagosan 11.4 szöglet született.',
-      trendCategory: 'Szögletek',
-      modelProb: 0.69,
-      marketOdds: 1.75,
-      oddsHistory: [1.85, 1.82, 1.80, 1.77, 1.75],
-      homeXg: 1.82,
-      awayXg: 1.54,
-      last8Trend: [true, true, true, true, true, false, true, true],
-    );
-
-    return [m1, m2, m3, m4];
+    return [
+      MatchPick(
+        id: 'm1',
+        league: 'Premier League',
+        kickoff: 'Ma 18:30',
+        homeTeam: 'Arsenal',
+        awayTeam: 'Aston Villa',
+        market: 'Mindkét csapat szerez gólt (BTTS)',
+        marketCode: 'btts',
+        trendSummary: 'Az utolsó 6 bajnoki meccsből 5-ször mindkét fél betalált, magas támadó xG-mutatókkal.',
+        trendCategory: 'Gólok / BTTS',
+        modelProb: PoissonEngine.calculate(2.15, 1.48).btts,
+        marketOdds: 1.72,
+        oddsHistory: [1.88, 1.84, 1.80, 1.76, 1.72],
+        homeXg: 2.15,
+        awayXg: 1.48,
+        last6Trend: [true, true, true, false, true, true],
+        isWatched: true,
+      ),
+      MatchPick(
+        id: 'm2',
+        league: 'NB I',
+        kickoff: 'Ma 19:45',
+        homeTeam: 'Ferencváros',
+        awayTeam: 'Paksi FC',
+        market: '2.5 gól felett',
+        marketCode: 'over25',
+        trendSummary: 'A Paks idegenbeli meccsein 3.4-es a gólátlag, az FTC hazai xG-je 2.35.',
+        trendCategory: 'Gólok / BTTS',
+        modelProb: PoissonEngine.calculate(2.35, 1.32).over25,
+        marketOdds: 1.65,
+        oddsHistory: [1.78, 1.75, 1.70, 1.68, 1.65],
+        homeXg: 2.35,
+        awayXg: 1.32,
+        last6Trend: [true, true, true, true, false, true],
+        isWatched: true,
+      ),
+      MatchPick(
+        id: 'm3',
+        league: 'La Liga',
+        kickoff: 'Ma 21:00',
+        homeTeam: 'Real Sociedad',
+        awayTeam: 'Villarreal',
+        market: 'Hazai győzelem (1)',
+        marketCode: 'home',
+        trendSummary: 'Tabella & xG előny: a Sociedad hazai pályán dominál, 1.98-as várható góllal.',
+        trendCategory: 'Tabella & Forma',
+        modelProb: PoissonEngine.calculate(1.98, 1.05).homeWin,
+        marketOdds: 2.15,
+        oddsHistory: [2.35, 2.28, 2.22, 2.18, 2.15],
+        homeXg: 1.98,
+        awayXg: 1.05,
+        last6Trend: [true, false, true, true, true, true],
+      ),
+    ];
   }
 
   Future<void> _loadSavedData() async {
     final prefs = await SharedPreferences.getInstance();
     final savedKey = prefs.getString('sportapi_key') ?? '';
-    final savedBase = prefs.getString('sportapi_base') ?? 'https://api.sportapi.ai/v1';
-    final savedEndpoint = prefs.getString('sportapi_endpoint') ?? '/football/matches';
+    String savedBase = prefs.getString('sportapi_base') ?? SportApiService.defaultBaseUrl;
+
+    // Automatikus migráció a hibás régi alapértelmezett URL-ről
+    if (savedBase.contains('api.sportapi.ai')) {
+      savedBase = SportApiService.defaultBaseUrl;
+      await prefs.setString('sportapi_base', savedBase);
+    }
+
     final savedBankroll = prefs.getDouble('bankroll') ?? 50000;
     final watchedIds = prefs.getStringList('watched_ids');
     final betsJson = prefs.getString('logged_bets');
@@ -598,7 +873,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     setState(() {
       _apiKey = savedKey;
       _baseUrl = savedBase;
-      _endpoint = savedEndpoint;
       _bankroll = savedBankroll;
       if (watchedIds != null) {
         for (final m in _matches) {
@@ -620,7 +894,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('sportapi_key', _apiKey);
     await prefs.setString('sportapi_base', _baseUrl);
-    await prefs.setString('sportapi_endpoint', _endpoint);
     await prefs.setDouble('bankroll', _bankroll);
     final watchedIds = _matches.where((m) => m.isWatched).map((m) => m.id).toList();
     await prefs.setStringList('watched_ids', watchedIds);
@@ -649,9 +922,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final targetDate = DateTime.now().add(Duration(days: _dayOffset));
     final dayLabel = _dayLabelForOffset(_dayOffset);
 
-    final result = await SportApiService.fetchMatches(
+    final result = await SportApiService.fetchFixturesByDate(
       baseUrl: _baseUrl,
-      endpoint: _endpoint,
       apiKey: _apiKey,
       targetDate: targetDate,
       dayLabel: dayLabel,
@@ -661,6 +933,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     if (mounted) {
       setState(() {
         _isLoadingApi = false;
+        _rateLimitRemaining = result.rateLimitRemaining ?? _rateLimitRemaining;
         _lastApiStatus = '${result.message}\nNyers válasz: ${result.rawPreview}';
         if (result.success && result.matches.isNotEmpty) {
           _matches = result.matches;
@@ -673,8 +946,116 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           SnackBar(content: Text(result.message)),
         );
       }
+
+      if (result.success && result.matches.isNotEmpty) {
+        _autoSettlePendingBets(result.matches);
+        _enrichMatchesWithStandings();
+      }
     }
     return result;
+  }
+
+  // Háttérben lekéri az érintett ligák tabelláját és valós gólátlagból újraszámolja az esélyeket
+  Future<void> _enrichMatchesWithStandings() async {
+    final leagueIds = _matches
+        .map((m) => m.leagueId)
+        .whereType<int>()
+        .toSet()
+        .take(6); // Max 6 liga lekérése egy körben az API-keret kíméléséhez
+
+    bool anyUpdated = false;
+    for (final lid in leagueIds) {
+      final table = await SportApiService.fetchStandings(
+        baseUrl: _baseUrl,
+        apiKey: _apiKey,
+        leagueId: lid,
+      );
+      if (table.isEmpty || !mounted) continue;
+
+      for (int i = 0; i < _matches.length; i++) {
+        final m = _matches[i];
+        if (m.leagueId != lid || m.hasStandingData) continue;
+        final hInfo = m.homeId != null ? table[m.homeId!] : null;
+        final aInfo = m.awayId != null ? table[m.awayId!] : null;
+
+        if (hInfo != null && aInfo != null && hInfo.played > 0 && aInfo.played > 0) {
+          final realHomeXg = ((hInfo.avgGoalsFor + aInfo.avgGoalsAgainst) / 2.0 * 1.12).clamp(0.45, 3.6);
+          final realAwayXg = ((aInfo.avgGoalsFor + hInfo.avgGoalsAgainst) / 2.0 * 0.94).clamp(0.35, 3.2);
+          final trend = SportApiService._extractFormTrend(hInfo, aInfo);
+
+          _matches[i] = SportApiService._buildPickFromXg(
+            id: m.id,
+            fixtureId: m.fixtureId,
+            leagueId: m.leagueId,
+            homeId: m.homeId,
+            awayId: m.awayId,
+            league: m.league,
+            leagueZone: m.leagueZone,
+            kickoff: m.kickoff,
+            status: m.status,
+            minute: m.minute,
+            homeScore: m.homeScore,
+            awayScore: m.awayScore,
+            homeTeam: m.homeTeam,
+            awayTeam: m.awayTeam,
+            homeXg: realHomeXg,
+            awayXg: realAwayXg,
+            last6Trend: trend,
+            homePos: hInfo.position,
+            awayPos: aInfo.position,
+            hasStandingData: true,
+            isWatched: m.isWatched,
+          );
+          anyUpdated = true;
+        }
+      }
+      if (anyUpdated && mounted) {
+        setState(() {});
+      }
+    }
+  }
+
+  // Automatikusan kiértékeli a függőben lévő tippeket, ha a meccs már FT státuszú
+  void _autoSettlePendingBets(List<MatchPick> freshMatches) {
+    bool changed = false;
+    for (int i = 0; i < _bets.length; i++) {
+      final bet = _bets[i];
+      if (bet.status != 'pending' || bet.fixtureId == null) continue;
+
+      final matchIdx = freshMatches.indexWhere((m) => m.fixtureId == bet.fixtureId);
+      if (matchIdx == -1) continue;
+      final match = freshMatches[matchIdx];
+      if (!match.isFinished || match.homeScore == null || match.awayScore == null) continue;
+
+      final hs = match.homeScore!;
+      final as = match.awayScore!;
+      bool won = false;
+      if (bet.marketCode == 'home') {
+        won = hs > as;
+      } else if (bet.marketCode == 'over25') {
+        won = (hs + as) > 2;
+      } else if (bet.marketCode == 'btts') {
+        won = hs > 0 && as > 0;
+      }
+
+      _bets[i] = BetRecord(
+        id: bet.id,
+        fixtureId: bet.fixtureId,
+        matchTitle: bet.matchTitle,
+        market: bet.market,
+        marketCode: bet.marketCode,
+        odds: bet.odds,
+        stake: bet.stake,
+        status: won ? 'won' : 'lost',
+        date: bet.date,
+      );
+      changed = true;
+    }
+
+    if (changed) {
+      setState(() {});
+      _saveState();
+    }
   }
 
   void _changeDayOffset(int newOffset) {
@@ -702,8 +1083,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         0,
         BetRecord(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
+          fixtureId: match.fixtureId,
           matchTitle: '${match.homeTeam} – ${match.awayTeam}',
           market: match.market,
+          marketCode: match.marketCode,
           odds: match.marketOdds,
           stake: stake,
           status: 'pending',
@@ -724,8 +1107,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         final old = _bets[idx];
         _bets[idx] = BetRecord(
           id: old.id,
+          fixtureId: old.fixtureId,
           matchTitle: old.matchTitle,
           market: old.market,
+          marketCode: old.marketCode,
           odds: old.odds,
           stake: old.stake,
           status: newStatus,
@@ -746,16 +1131,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   void _openSettingsDialog() {
     final keyController = TextEditingController(text: _apiKey);
     final baseController = TextEditingController(text: _baseUrl);
-    final endpointController = TextEditingController(text: _endpoint);
     String testOutput = _lastApiStatus;
     bool testing = false;
-
-    final presetEndpoints = [
-      '/football/matches',
-      '/football/fixtures',
-      '/football/events',
-      '/matches',
-    ];
 
     showDialog(
       context: context,
@@ -777,15 +1154,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Illeszd be a sportapi.ai profilodból másolt API-kulcsot:',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                      'Hivatalos végpont: GET /api/fixtures/date/{date}\nFejléc: X-Api-Key',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF10B981)),
                     ),
-                    const SizedBox(height: 10),
+                    if (_rateLimitRemaining != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Maradék napi keret: $_rateLimitRemaining lekérés',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
                     TextField(
                       controller: keyController,
                       decoration: const InputDecoration(
-                        labelText: 'SportAPI.ai Kulcs',
-                        hintText: 'sk_live_... vagy API key',
+                        labelText: 'X-Api-Key (sk_live_...)',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
@@ -800,30 +1183,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: endpointController,
-                      decoration: const InputDecoration(
-                        labelText: 'Végpont (Endpoint)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: presetEndpoints.map((ep) {
-                        return ActionChip(
-                          label: Text(ep, style: const TextStyle(fontSize: 11)),
-                          onPressed: () {
-                            setDialogState(() {
-                              endpointController.text = ep;
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
@@ -833,7 +1192,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                 setDialogState(() => testing = true);
                                 _apiKey = keyController.text.trim();
                                 _baseUrl = baseController.text.trim();
-                                _endpoint = endpointController.text.trim();
                                 await _saveState();
                                 final res = await _syncSportApi(silent: true);
                                 setDialogState(() {
@@ -890,7 +1248,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     setState(() {
                       _apiKey = keyController.text.trim();
                       _baseUrl = baseController.text.trim();
-                      _endpoint = endpointController.text.trim();
                     });
                     _saveState();
                     Navigator.pop(context);
@@ -964,6 +1321,15 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   void _openMatchDetail(MatchPick match) {
     final poisson = match.poisson;
+    Future<FixtureDetailData?>? detailFuture;
+    if (_apiKey.isNotEmpty && match.fixtureId != null && match.fixtureId! > 0) {
+      detailFuture = SportApiService.fetchFixtureDetails(
+        baseUrl: _baseUrl,
+        apiKey: _apiKey,
+        fixtureId: match.fixtureId!,
+      );
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -974,219 +1340,294 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade700,
-                        borderRadius: BorderRadius.circular(2),
+            return DraggableScrollableSheet(
+              initialChildSize: 0.82,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              expand: false,
+              builder: (context, scrollController) {
+                return ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade700,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${match.league} • ${match.kickoff}',
-                          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color.fromRGBO(16, 185, 129, 0.16),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '+${match.edgePercent.toStringAsFixed(1)}% VALUE',
-                          style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${match.homeTeam} – ${match.awayTeam}',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Poisson 1X2 Valószínűség',
-                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(
-                          flex: (poisson.homeWin * 100).round().clamp(10, 80),
-                          child: Container(
-                            height: 28,
-                            color: const Color(0xFF10B981),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '1: ${(poisson.homeWin * 100).round()}%',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black),
-                            ),
+                          child: Text(
+                            '${match.league}${match.leagueZone.isNotEmpty ? " (${match.leagueZone})" : ""} • ${match.kickoff}',
+                            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
                           ),
                         ),
-                        Expanded(
-                          flex: (poisson.draw * 100).round().clamp(10, 80),
-                          child: Container(
-                            height: 28,
-                            color: const Color(0xFF374151),
-                            alignment: Alignment.center,
-                            child: Text(
-                              'X: ${(poisson.draw * 100).round()}%',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                            ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color.fromRGBO(16, 185, 129, 0.16),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                        ),
-                        Expanded(
-                          flex: (poisson.awayWin * 100).round().clamp(10, 80),
-                          child: Container(
-                            height: 28,
-                            color: const Color(0xFF3B82F6),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '2: ${(poisson.awayWin * 100).round()}%',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          child: Text(
+                            '+${match.edgePercent.toStringAsFixed(1)}% VALUE',
+                            style: const TextStyle(
+                              color: Color(0xFF10B981),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
                             ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Legvalószínűbb pontos végeredmények (Poisson)',
-                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: poisson.topScores.map((s) {
-                      return Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0A0E17),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFF1F2937)),
-                          ),
-                          child: Column(
-                            children: [
-                              Text(s.score, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                              Text('${(s.probability * 100).toStringAsFixed(1)}%',
-                                  style: const TextStyle(fontSize: 11, color: Color(0xFF10B981))),
-                            ],
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${match.homeTeam} – ${match.awayTeam}',
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                           ),
                         ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Odds-mozgás (Nyitó → Aktuális)',
-                        style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-                      ),
+                        if (match.homeScore != null && match.awayScore != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: match.isLive ? const Color(0xFFEF4444) : const Color(0xFF1F2937),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${match.homeScore} - ${match.awayScore} (${match.isLive ? "${match.minute ?? "LIVE"}'" : match.status})',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (match.homePos != null && match.awayPos != null) ...[
+                      const SizedBox(height: 4),
                       Text(
-                        '${match.oddsHistory.first.toStringAsFixed(2)} → ${match.oddsHistory.last.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          color: Color(0xFF10B981),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
+                        'Tabella helyezés: ${match.homeTeam} (${match.homePos}.) vs ${match.awayTeam} (${match.awayPos}.)',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF3B82F6), fontWeight: FontWeight.w600),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 60,
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0A0E17),
-                      borderRadius: BorderRadius.circular(12),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Poisson 1X2 Valószínűség',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
                     ),
-                    child: CustomPaint(
-                      painter: SparklinePainter(match.oddsHistory),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: (poisson.homeWin * 100).round().clamp(10, 80),
+                            child: Container(
+                              height: 28,
+                              color: const Color(0xFF10B981),
+                              alignment: Alignment.center,
+                              child: Text(
+                                '1: ${(poisson.homeWin * 100).round()}%',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: (poisson.draw * 100).round().clamp(10, 80),
+                            child: Container(
+                              height: 28,
+                              color: const Color(0xFF374151),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'X: ${(poisson.draw * 100).round()}%',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            flex: (poisson.awayWin * 100).round().clamp(10, 80),
+                            child: Container(
+                              height: 28,
+                              color: const Color(0xFF3B82F6),
+                              alignment: Alignment.center,
+                              child: Text(
+                                '2: ${(poisson.awayWin * 100).round()}%',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Várható gólok (xG): ${match.homeXg.toStringAsFixed(2)}',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      Text(match.awayXg.toStringAsFixed(2),
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: LinearProgressIndicator(
-                      value: match.homeXg / (match.homeXg + match.awayXg),
-                      minHeight: 8,
-                      backgroundColor: const Color(0xFF3B82F6),
-                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Legvalószínűbb pontos végeredmények (Poisson)',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            _toggleWatch(match.id);
-                            setModalState(() {});
-                          },
-                          icon: Icon(match.isWatched ? Icons.notifications_active : Icons.notifications_none),
-                          label: Text(match.isWatched ? 'Figyelve' : 'Riasztás'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: poisson.topScores.map((s) {
+                        return Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0A0E17),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF1F2937)),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(s.score, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text('${(s.probability * 100).toStringAsFixed(1)}%',
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF10B981))),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Várható gólok (xG): ${match.homeXg.toStringAsFixed(2)}',
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                        Text(match.awayXg.toStringAsFixed(2),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: match.homeXg / (match.homeXg + match.awayXg),
+                        minHeight: 8,
+                        backgroundColor: const Color(0xFF3B82F6),
+                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
+                      ),
+                    ),
+
+                    // Élő meccsstatisztikák és események a SportAPI.ai /fixtures/{id} és /stats végpontokról
+                    if (detailFuture != null)
+                      FutureBuilder<FixtureDetailData?>(
+                        future: detailFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 20),
+                              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                            );
+                          }
+                          final detail = snapshot.data;
+                          if (detail == null) return const SizedBox.shrink();
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (detail.stadium != null || detail.homeCoach != null) ...[
+                                const Divider(height: 24, color: Color(0xFF1F2937)),
+                                if (detail.stadium != null)
+                                  Text('Stadion: ${detail.stadium}${detail.city != null ? " (${detail.city})" : ""}',
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                                if (detail.homeCoach != null && detail.awayCoach != null)
+                                  Text('Edzők: ${detail.homeCoach} vs ${detail.awayCoach}',
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                              ],
+                              if (detail.homeStats != null && detail.awayStats != null) ...[
+                                const Divider(height: 24, color: Color(0xFF1F2937)),
+                                const Text('Meccs statisztikák (SportAPI.ai)',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                                const SizedBox(height: 8),
+                                _StatCompareRow(
+                                  label: 'Összes lövés',
+                                  homeVal: '${detail.homeStats!['shots'] ?? 0}',
+                                  awayVal: '${detail.awayStats!['shots'] ?? 0}',
+                                ),
+                                _StatCompareRow(
+                                  label: 'Kaput eltaláló lövés',
+                                  homeVal: '${detail.homeStats!['shots_on_target'] ?? 0}',
+                                  awayVal: '${detail.awayStats!['shots_on_target'] ?? 0}',
+                                ),
+                                _StatCompareRow(
+                                  label: 'Passzpontosság',
+                                  homeVal: '${detail.homeStats!['pass_accuracy'] ?? 0}%',
+                                  awayVal: '${detail.awayStats!['pass_accuracy'] ?? 0}%',
+                                ),
+                                _StatCompareRow(
+                                  label: 'Sárga lapok',
+                                  homeVal: '${detail.homeStats!['yellow_cards'] ?? 0}',
+                                  awayVal: '${detail.awayStats!['yellow_cards'] ?? 0}',
+                                ),
+                              ],
+                              if (detail.events.isNotEmpty) ...[
+                                const Divider(height: 24, color: Color(0xFF1F2937)),
+                                const Text('Meccs események',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 6),
+                                ...detail.events.take(8).map((ev) {
+                                  final type = ev['event_type'] ?? '';
+                                  final icon = type == 'goal' ? '⚽' : (type == 'yellow_card' ? '🟨' : '🔄');
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2),
+                                    child: Text(
+                                      "$icon ${ev['minute'] ?? ''} ${ev['player_name'] ?? ''} (${ev['team_side'] == 'home' ? match.homeTeam : match.awayTeam})",
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFFD1D5DB)),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              _toggleWatch(match.id);
+                              setModalState(() {});
+                            },
+                            icon: Icon(match.isWatched ? Icons.notifications_active : Icons.notifications_none),
+                            label: Text(match.isWatched ? 'Figyelve' : 'Riasztás'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _openLogBetDialog(match);
-                          },
-                          icon: const Icon(Icons.add_chart),
-                          label: const Text('Tipp naplózása'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _openLogBetDialog(match);
+                            },
+                            icon: const Icon(Icons.add_chart),
+                            label: const Text('Tipp naplózása'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                      ],
+                    ),
+                  ],
+                );
+              },
             );
           },
         );
@@ -1283,6 +1724,33 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           NavigationDestination(icon: Icon(Icons.radar), label: 'Trendek'),
           NavigationDestination(icon: Icon(Icons.calculate_outlined), label: 'Kalkulátor'),
           NavigationDestination(icon: Icon(Icons.analytics_outlined), label: 'Napló & ROI'),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCompareRow extends StatelessWidget {
+  final String label;
+  final String homeVal;
+  final String awayVal;
+
+  const _StatCompareRow({
+    required this.label,
+    required this.homeVal,
+    required this.awayVal,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(homeVal, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(label, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+          Text(awayVal, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
         ],
       ),
     );
@@ -1420,6 +1888,26 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
                               ),
                               Row(
                                 children: [
+                                  if (match.isLive || match.isFinished) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: match.isLive
+                                            ? const Color.fromRGBO(239, 68, 68, 0.2)
+                                            : const Color(0xFF1F2937),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '${match.homeScore ?? 0}-${match.awayScore ?? 0} ${match.isLive ? "${match.minute ?? "LIVE"}'" : match.status}',
+                                        style: TextStyle(
+                                          color: match.isLive ? const Color(0xFFEF4444) : Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ],
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
@@ -1546,7 +2034,7 @@ class _TrendRadarTabState extends State<TrendRadarTab> {
 
   @override
   Widget build(BuildContext context) {
-    final categories = ['Mind', 'Gólok / BTTS', 'xG eltérés', 'Szögletek'];
+    final categories = ['Mind', 'Tabella & Forma', 'Gólok / BTTS', 'xG eltérés'];
     final list = widget.matches.where((m) => _category == 'Mind' || m.trendCategory == _category).toList();
 
     return Column(
@@ -1581,7 +2069,7 @@ class _TrendRadarTabState extends State<TrendRadarTab> {
             itemCount: list.length,
             itemBuilder: (context, index) {
               final match = list[index];
-              final hits = match.last8Trend.where((e) => e).length;
+              final hits = match.last6Trend.where((e) => e).length;
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: InkWell(
@@ -1597,7 +2085,7 @@ class _TrendRadarTabState extends State<TrendRadarTab> {
                           children: [
                             Text(match.trendCategory,
                                 style: const TextStyle(color: Color(0xFF3B82F6), fontWeight: FontWeight.bold, fontSize: 12)),
-                            Text('$hits / 8 találat (${((hits / 8) * 100).round()}%)',
+                            Text('$hits / 6 forma-találat (${((hits / 6) * 100).round()}%)',
                                 style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
                           ],
                         ),
@@ -1608,11 +2096,11 @@ class _TrendRadarTabState extends State<TrendRadarTab> {
                         Text(match.trendSummary, style: const TextStyle(fontSize: 13, color: Color(0xFFD1D5DB))),
                         const SizedBox(height: 12),
                         Row(
-                          children: match.last8Trend.map((hit) {
+                          children: match.last6Trend.map((hit) {
                             return Container(
                               margin: const EdgeInsets.only(right: 6),
-                              width: 22,
-                              height: 22,
+                              width: 24,
+                              height: 24,
                               decoration: BoxDecoration(
                                 color: hit ? const Color(0xFF10B981) : const Color(0xFFEF4444),
                                 borderRadius: BorderRadius.circular(6),
@@ -2085,38 +2573,4 @@ class _StatusChip extends StatelessWidget {
       ),
     );
   }
-}
-
-class SparklinePainter extends CustomPainter {
-  final List<double> points;
-
-  SparklinePainter(this.points);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.length < 2) return;
-    final minVal = points.reduce((a, b) => a < b ? a : b);
-    final maxVal = points.reduce((a, b) => a > b ? a : b);
-    final range = (maxVal - minVal) == 0 ? 1.0 : (maxVal - minVal);
-
-    final paint = Paint()
-      ..color = const Color(0xFF10B981)
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    for (int i = 0; i < points.length; i++) {
-      final x = (i / (points.length - 1)) * size.width;
-      final y = size.height - (((points[i] - minVal) / range) * size.height);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
