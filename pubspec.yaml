@@ -1,16 +1,18 @@
 name: goaledge_ai
-description: Adatvezérelt focis trend-, esély- és value-elemző alkalmazás.
+description: GoalEdge AI - Dixon-Coles & SportAPI.ai sportanalitikai alkalmazás
 publish_to: 'none'
-version: 2.0.0+2
+version: 5.0.0+5
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
+  cupertino_icons: ^1.0.8
   http: ^1.2.2
   shared_preferences: ^2.3.2
+  flutter_local_notifications: ^18.0.1
 
 dev_dependencies:
   flutter_test:
