@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -11,10 +12,13 @@ typedef StandingsMap = Map<int, TeamStandingInfo>;
 typedef StandingRowList = List<TeamStandingInfo>;
 typedef StringList = List<String>;
 typedef DoubleList = List<double>;
+typedef CurveList = List<DoubleList>;
 typedef BoolList = List<bool>;
 typedef MatchList = List<MatchPick>;
 typedef BetList = List<BetRecord>;
 typedef ScoreProbList = List<ScoreProbability>;
+typedef MarketOptionList = List<MarketOption>;
+typedef StringDoubleMap = Map<String, double>;
 
 void main() {
   runApp(const GoalEdgeApp());
@@ -52,7 +56,7 @@ class GoalEdgeApp extends StatelessWidget {
 }
 
 // ==========================================
-// 1. MATEMATIKAI MOTOR (POISSON-ELOSZLÁS)
+// 1. DIXON-COLES & POISSON MATEMATIKAI MOTOR
 // ==========================================
 
 class ScoreProbability {
@@ -62,21 +66,53 @@ class ScoreProbability {
   ScoreProbability(this.score, this.probability);
 }
 
+class MarketOption {
+  final String code;
+  final String label;
+  final double probability;
+  final double fairOdds;
+  final double refOdds;
+  final double edgePercent;
+
+  MarketOption({
+    required this.code,
+    required this.label,
+    required this.probability,
+    required this.fairOdds,
+    required this.refOdds,
+    required this.edgePercent,
+  });
+}
+
 class PoissonResult {
   final double homeWin;
   final double draw;
   final double awayWin;
+  final double doubleChance1X;
+  final double doubleChanceX2;
+  final double dnbHome;
+  final double over15;
   final double over25;
+  final double under25;
   final double btts;
+  final double homeOver15;
   final ScoreProbList topScores;
+  final MarketOptionList allMarkets;
 
   PoissonResult({
     required this.homeWin,
     required this.draw,
     required this.awayWin,
+    required this.doubleChance1X,
+    required this.doubleChanceX2,
+    required this.dnbHome,
+    required this.over15,
     required this.over25,
+    required this.under25,
     required this.btts,
+    required this.homeOver15,
     required this.topScores,
+    required this.allMarkets,
   });
 }
 
@@ -90,20 +126,43 @@ class PoissonEngine {
     return (math.pow(lambda, k) * math.exp(-lambda)) / factorial;
   }
 
-  static PoissonResult calculate(double homeXg, double awayXg) {
+  static double _dixonColesTau(int h, int a, double lambdaH, double lambdaA, double rho) {
+    if (h == 0 && a == 0) return (1.0 - (lambdaH * lambdaA * rho)).clamp(0.15, 2.2);
+    if (h == 0 && a == 1) return (1.0 + (lambdaH * rho)).clamp(0.15, 2.2);
+    if (h == 1 && a == 0) return (1.0 + (lambdaA * rho)).clamp(0.15, 2.2);
+    if (h == 1 && a == 1) return (1.0 - rho).clamp(0.15, 2.2);
+    return 1.0;
+  }
+
+  static PoissonResult calculate(double homeXg, double awayXg, {double rho = -0.085}) {
+    final CurveList grid = List.generate(8, (_) => List.filled(8, 0.0));
+    double totalMass = 0.0;
+
+    for (int h = 0; h <= 7; h++) {
+      final ph = _pmf(homeXg, h);
+      for (int a = 0; a <= 7; a++) {
+        final pa = _pmf(awayXg, a);
+        final tau = _dixonColesTau(h, a, homeXg, awayXg, rho);
+        final p = ph * pa * tau;
+        grid[h][a] = p;
+        totalMass += p;
+      }
+    }
+
     double pHome = 0.0;
     double pDraw = 0.0;
     double pAway = 0.0;
+    double pOver15 = 0.0;
     double pOver25 = 0.0;
     double pBtts = 0.0;
+    double pHomeOver15 = 0.0;
     final ScoreProbList scores = [];
 
-    for (int h = 0; h <= 6; h++) {
-      final ph = _pmf(homeXg, h);
-      for (int a = 0; a <= 6; a++) {
-        final pa = _pmf(awayXg, a);
-        final prob = ph * pa;
+    final norm = totalMass > 0 ? totalMass : 1.0;
 
+    for (int h = 0; h <= 7; h++) {
+      for (int a = 0; a <= 7; a++) {
+        final prob = grid[h][a] / norm;
         if (h > a) {
           pHome += prob;
         } else if (h == a) {
@@ -111,29 +170,72 @@ class PoissonEngine {
         } else {
           pAway += prob;
         }
-
+        if (h + a > 1) pOver15 += prob;
         if (h + a > 2) pOver25 += prob;
         if (h > 0 && a > 0) pBtts += prob;
-        scores.add(ScoreProbability('$h-$a', prob));
+        if (h > 1) pHomeOver15 += prob;
+        if (h <= 5 && a <= 5) {
+          scores.add(ScoreProbability('$h-$a', prob));
+        }
       }
-    }
-
-    final total1X2 = pHome + pDraw + pAway;
-    if (total1X2 > 0) {
-      pHome /= total1X2;
-      pDraw /= total1X2;
-      pAway /= total1X2;
     }
 
     scores.sort((a, b) => b.probability.compareTo(a.probability));
 
+    final p1 = pHome.clamp(0.02, 0.96);
+    final pX = pDraw.clamp(0.02, 0.90);
+    final p2 = pAway.clamp(0.02, 0.96);
+    final p1X = (p1 + pX).clamp(0.05, 0.98);
+    final pX2 = (pX + p2).clamp(0.05, 0.98);
+    final pDnbHome = (p1 / (p1 + p2)).clamp(0.05, 0.96);
+    final pO15 = pOver15.clamp(0.05, 0.98);
+    final pO25 = pOver25.clamp(0.03, 0.96);
+    final pU25 = (1.0 - pO25).clamp(0.03, 0.96);
+    final pGg = pBtts.clamp(0.03, 0.96);
+    final pHo15 = pHomeOver15.clamp(0.03, 0.96);
+
+    MarketOption buildOpt(String code, String label, double prob, double edgeBoost) {
+      final fair = 1.0 / prob;
+      final ref = double.parse((fair * edgeBoost).clamp(1.18, 5.50).toStringAsFixed(2));
+      final edge = (prob - (1.0 / ref)) * 100.0;
+      return MarketOption(
+        code: code,
+        label: label,
+        probability: prob,
+        fairOdds: double.parse(fair.toStringAsFixed(2)),
+        refOdds: ref,
+        edgePercent: edge,
+      );
+    }
+
+    final MarketOptionList options = [
+      buildOpt('home', 'Hazai győzelem (1)', p1, 1.07),
+      buildOpt('draw', 'Döntetlen (X)', pX, 1.06),
+      buildOpt('away', 'Vendég győzelem (2)', p2, 1.07),
+      buildOpt('1x', 'Dupla esély (1X)', p1X, 1.05),
+      buildOpt('x2', 'Dupla esély (X2)', pX2, 1.05),
+      buildOpt('dnb_home', 'Hazai DNB (Tét visszajár)', pDnbHome, 1.06),
+      buildOpt('over15', '1.5 gól felett', pO15, 1.05),
+      buildOpt('over25', '2.5 gól felett', pO25, 1.09),
+      buildOpt('under25', '2.5 gól alatt', pU25, 1.08),
+      buildOpt('btts', 'Mindkét csapat szerez gólt (BTTS)', pGg, 1.09),
+      buildOpt('home_over15', 'Hazai csapat 1.5 gól felett', pHo15, 1.08),
+    ];
+
     return PoissonResult(
-      homeWin: pHome,
-      draw: pDraw,
-      awayWin: pAway,
-      over25: pOver25.clamp(0.01, 0.99),
-      btts: pBtts.clamp(0.01, 0.99),
+      homeWin: p1,
+      draw: pX,
+      awayWin: p2,
+      doubleChance1X: p1X,
+      doubleChanceX2: pX2,
+      dnbHome: pDnbHome,
+      over15: pO15,
+      over25: pO25,
+      under25: pU25,
+      btts: pGg,
+      homeOver15: pHo15,
       topScores: scores.take(3).toList(),
+      allMarkets: options,
     );
   }
 }
@@ -200,6 +302,8 @@ class MatchPick {
   double homeXg;
   double awayXg;
   BoolList last6Trend;
+  StringList homeFormCodes;
+  StringList awayFormCodes;
   int? homePos;
   int? awayPos;
   bool hasStandingData;
@@ -231,6 +335,8 @@ class MatchPick {
     required this.homeXg,
     required this.awayXg,
     required this.last6Trend,
+    this.homeFormCodes = const ['W', 'W', 'D', 'W', 'L'],
+    this.awayFormCodes = const ['L', 'W', 'D', 'W', 'W'],
     this.homePos,
     this.awayPos,
     this.hasStandingData = false,
@@ -254,7 +360,7 @@ class MatchPick {
     if (!isLive) return false;
     final min = parsedMinute;
     final diff = ((homeScore ?? 0) - (awayScore ?? 0)).abs();
-    return min >= 60 && diff <= 1 && (homeXg + awayXg) >= 2.4;
+    return min >= 60 && diff <= 1 && (homeXg + awayXg) >= 2.35;
   }
 
   JsonMap toJson() => {
@@ -283,6 +389,8 @@ class MatchPick {
         'homeXg': homeXg,
         'awayXg': awayXg,
         'last6Trend': last6Trend,
+        'homeFormCodes': homeFormCodes,
+        'awayFormCodes': awayFormCodes,
         'homePos': homePos,
         'awayPos': awayPos,
         'hasStandingData': hasStandingData,
@@ -319,6 +427,12 @@ class MatchPick {
         last6Trend: (json['last6Trend'] is List)
             ? (json['last6Trend'] as List).map((e) => e == true).toList()
             : [true, true, false, true, true, true],
+        homeFormCodes: (json['homeFormCodes'] is List)
+            ? (json['homeFormCodes'] as List).map((e) => e.toString()).toList()
+            : ['W', 'W', 'D', 'W', 'L'],
+        awayFormCodes: (json['awayFormCodes'] is List)
+            ? (json['awayFormCodes'] as List).map((e) => e.toString()).toList()
+            : ['L', 'W', 'D', 'W', 'W'],
         homePos: (json['homePos'] as num?)?.toInt(),
         awayPos: (json['awayPos'] as num?)?.toInt(),
         hasStandingData: json['hasStandingData'] == true,
@@ -369,6 +483,7 @@ class BetRecord {
   final String market;
   final String marketCode;
   final double odds;
+  final double? closingOdds;
   final double stake;
   final String status;
   final String date;
@@ -380,6 +495,7 @@ class BetRecord {
     required this.market,
     this.marketCode = 'over25',
     required this.odds,
+    this.closingOdds,
     required this.stake,
     required this.status,
     required this.date,
@@ -391,6 +507,11 @@ class BetRecord {
     return 0.0;
   }
 
+  double? get clvPercent {
+    if (closingOdds == null || closingOdds! <= 1.0) return null;
+    return ((odds / closingOdds!) - 1.0) * 100.0;
+  }
+
   JsonMap toJson() => {
         'id': id,
         'fixtureId': fixtureId,
@@ -398,6 +519,7 @@ class BetRecord {
         'market': market,
         'marketCode': marketCode,
         'odds': odds,
+        'closingOdds': closingOdds,
         'stake': stake,
         'status': status,
         'date': date,
@@ -410,6 +532,7 @@ class BetRecord {
         market: json['market'] ?? '',
         marketCode: json['marketCode'] ?? 'over25',
         odds: (json['odds'] as num?)?.toDouble() ?? 1.80,
+        closingOdds: (json['closingOdds'] as num?)?.toDouble(),
         stake: (json['stake'] as num?)?.toDouble() ?? 1000.0,
         status: json['status'] ?? 'pending',
         date: json['date'] ?? '',
@@ -417,7 +540,7 @@ class BetRecord {
 }
 
 // ==========================================
-// 3. SPORTAPI.AI KLIENS (ETAG + LOGÓK + LINEUPS)
+// 3. SPORTAPI.AI KLIENS (ETAG + KALIBRÁCIÓ)
 // ==========================================
 
 class SportApiResponse {
@@ -474,13 +597,48 @@ class SportApiService {
     return res;
   }
 
+  static double leagueAvgGoals(StandingsMap table) {
+    if (table.isEmpty) return 1.38;
+    int totalGoals = 0;
+    int totalMatches = 0;
+    for (final row in table.values) {
+      totalGoals += row.goalsFor;
+      totalMatches += row.played;
+    }
+    if (totalMatches == 0) return 1.38;
+    return (totalGoals / totalMatches).clamp(0.95, 2.15);
+  }
+
+  static StringList extractWdlCodes(TeamStandingInfo info) {
+    final StringList codes = [];
+    for (final f in info.form.take(5)) {
+      final res = (f['result'] ?? '').toString().toUpperCase();
+      if (res == 'W' || res == 'D' || res == 'L') {
+        codes.add(res);
+      } else {
+        final hg = (f['home_score'] as num?)?.toInt() ?? 0;
+        final ag = (f['away_score'] as num?)?.toInt() ?? 0;
+        final isHome = (f['home_team'] ?? '').toString() == info.teamName;
+        if (hg == ag) {
+          codes.add('D');
+        } else if ((isHome && hg > ag) || (!isHome && ag > hg)) {
+          codes.add('W');
+        } else {
+          codes.add('L');
+        }
+      }
+    }
+    if (codes.isEmpty) return ['W', 'D', 'W', 'L', 'W'];
+    return codes;
+  }
+
   static Future<SportApiResponse> fetchFixturesByDate({
     required String baseUrl,
     required String apiKey,
     required DateTime targetDate,
     required String dayLabel,
     required StringList watchedIds,
-    required Map<String, double> customOddsMap,
+    required StringDoubleMap customOddsMap,
   }) async {
     final cleanBase = baseUrl.trim().replaceAll(RegExp(r'/$'), '');
     final dateStr = _formatDate(targetDate);
@@ -573,7 +731,7 @@ class SportApiService {
       });
 
       final MatchList parsed = [];
-      for (final item in sortedRaw.take(45)) {
+      for (final item in sortedRaw.take(50)) {
         final fixtureId = (item['id'] as num?)?.toInt() ?? 0;
         final leagueId = (item['league_id'] as num?)?.toInt();
         final homeId = (item['home_id'] as num?)?.toInt();
@@ -602,18 +760,28 @@ class SportApiService {
         int? awayPos;
         bool hasStandings = false;
         BoolList trendList = List.generate(6, (_) => rng.nextDouble() > 0.3);
+        StringList hForm = ['W', 'D', 'W', 'W', 'L'];
+        StringList aForm = ['L', 'W', 'D', 'L', 'W'];
 
         if (leagueId != null && _standingsCache.containsKey(leagueId)) {
           final table = _standingsCache[leagueId]!;
           final hInfo = homeId != null ? table[homeId] : null;
           final aInfo = awayId != null ? table[awayId] : null;
           if (hInfo != null && aInfo != null && hInfo.played > 0 && aInfo.played > 0) {
-            hXg = ((hInfo.avgGoalsFor + aInfo.avgGoalsAgainst) / 2.0 * 1.12).clamp(0.45, 3.6);
-            aXg = ((aInfo.avgGoalsFor + hInfo.avgGoalsAgainst) / 2.0 * 0.94).clamp(0.35, 3.2);
+            final lAvg = leagueAvgGoals(table);
+            final hAttack = hInfo.avgGoalsFor / lAvg;
+            final aDefense = aInfo.avgGoalsAgainst / lAvg;
+            final aAttack = aInfo.avgGoalsFor / lAvg;
+            final hDefense = hInfo.avgGoalsAgainst / lAvg;
+
+            hXg = (hAttack * aDefense * lAvg * 1.12).clamp(0.45, 3.6);
+            aXg = (aAttack * hDefense * lAvg * 0.94).clamp(0.35, 3.2);
             homePos = hInfo.position;
             awayPos = aInfo.position;
             hasStandings = true;
             trendList = _extractFormTrend(hInfo, aInfo);
+            hForm = extractWdlCodes(hInfo);
+            aForm = extractWdlCodes(aInfo);
           }
         }
 
@@ -635,6 +803,8 @@ class SportApiService {
           homeXg: hXg,
           awayXg: aXg,
           last6Trend: trendList,
+          homeFormCodes: hForm,
+          awayFormCodes: aForm,
           homePos: homePos,
           awayPos: awayPos,
           hasStandingData: hasStandings,
@@ -700,6 +870,8 @@ class SportApiService {
     required double homeXg,
     required double awayXg,
     required BoolList last6Trend,
+    required StringList homeFormCodes,
+    required StringList awayFormCodes,
     int? homePos,
     int? awayPos,
     required bool hasStandingData,
@@ -708,44 +880,30 @@ class SportApiService {
   }) {
     final poisson = PoissonEngine.calculate(homeXg, awayXg);
 
-    String market;
-    String marketCode;
-    double prob;
-    String category;
-
-    if (poisson.homeWin >= 0.56) {
-      market = 'Hazai győzelem (1)';
-      marketCode = 'home';
-      prob = poisson.homeWin;
-      category = 'Tabella & Forma';
-    } else if (poisson.over25 >= 0.55) {
-      market = '2.5 gól felett';
-      marketCode = 'over25';
-      prob = poisson.over25;
-      category = 'Gólok / BTTS';
-    } else if (poisson.btts >= 0.54) {
-      market = 'Mindkét csapat szerez gólt (BTTS)';
-      marketCode = 'btts';
-      prob = poisson.btts;
-      category = 'Gólok / BTTS';
-    } else {
-      market = 'Hazai győzelem (1)';
-      marketCode = 'home';
-      prob = poisson.homeWin;
-      category = 'xG eltérés';
+    // Legjobb piaci opció kiválasztása Dixon-Coles alapján
+    MarketOption best = poisson.allMarkets.first;
+    for (final opt in poisson.allMarkets) {
+      if (opt.probability >= 0.48 && opt.edgePercent > best.edgePercent) {
+        best = opt;
+      }
     }
 
-    final fairOdds = 1.0 / prob;
-    final defaultOdds = double.parse((fairOdds * 1.08).clamp(1.30, 4.20).toStringAsFixed(2));
-    final finalOdds = customOdds ?? defaultOdds;
+    String category = 'xG eltérés';
+    if (best.code.contains('over') || best.code.contains('under') || best.code == 'btts') {
+      category = 'Gólok / BTTS';
+    } else if (hasStandingData) {
+      category = 'Tabella & Forma';
+    }
+
+    final finalOdds = customOdds ?? best.refOdds;
 
     String summary;
     if (hasStandingData && homePos != null && awayPos != null) {
       summary =
-          'Tabella: $homePos. hely vs $awayPos. hely • Valós gólátlag alapú xG: ${homeXg.toStringAsFixed(2)} – ${awayXg.toStringAsFixed(2)} (BTTS: ${(poisson.btts * 100).round()}%).';
+          'Dixon-Coles • Tabella: $homePos. hely vs $awayPos. hely • Liga-kalibrált xG: ${homeXg.toStringAsFixed(2)} – ${awayXg.toStringAsFixed(2)} (BTTS: ${(poisson.btts * 100).round()}%).';
     } else {
       summary =
-          'Poisson-modell: várható összgól ${(homeXg + awayXg).toStringAsFixed(2)}, 2.5+ gól esély ${(poisson.over25 * 100).round()}%, BTTS ${(poisson.btts * 100).round()}%.';
+          'Dixon-Coles modell: várható összgól ${(homeXg + awayXg).toStringAsFixed(2)}, 2.5+ gól ${(poisson.over25 * 100).round()}%, BTTS ${(poisson.btts * 100).round()}%.';
     }
 
     return MatchPick(
@@ -763,22 +921,24 @@ class SportApiService {
       awayScore: awayScore,
       homeTeam: homeTeam,
       awayTeam: awayTeam,
-      market: market,
-      marketCode: marketCode,
+      market: best.label,
+      marketCode: best.code,
       trendSummary: summary,
       trendCategory: category,
-      modelProb: prob,
+      modelProb: best.probability,
       marketOdds: finalOdds,
       isCustomOdds: customOdds != null,
       oddsHistory: [
-        double.parse((defaultOdds + 0.14).toStringAsFixed(2)),
-        double.parse((defaultOdds + 0.08).toStringAsFixed(2)),
-        double.parse((defaultOdds + 0.03).toStringAsFixed(2)),
+        double.parse((best.refOdds + 0.14).toStringAsFixed(2)),
+        double.parse((best.refOdds + 0.08).toStringAsFixed(2)),
+        double.parse((best.refOdds + 0.03).toStringAsFixed(2)),
         finalOdds,
       ],
       homeXg: double.parse(homeXg.toStringAsFixed(2)),
       awayXg: double.parse(awayXg.toStringAsFixed(2)),
       last6Trend: last6Trend,
+      homeFormCodes: homeFormCodes,
+      awayFormCodes: awayFormCodes,
       homePos: homePos,
       awayPos: awayPos,
       hasStandingData: hasStandingData,
@@ -853,17 +1013,17 @@ class SportApiService {
     final cleanBase = baseUrl.trim().replaceAll(RegExp(r'/$'), '');
 
     try {
-      final futures = <Future<http.Response>>[
-        _getWithEtag(Uri.parse('$cleanBase/fixtures/$fixtureId'), apiKey),
-        _getWithEtag(Uri.parse('$cleanBase/fixtures/$fixtureId/stats'), apiKey),
-        _getWithEtag(Uri.parse('$cleanBase/fixtures/$fixtureId/lineups'), apiKey),
-      ];
+      final f0 = _getWithEtag(Uri.parse('$cleanBase/fixtures/$fixtureId'), apiKey);
+      final f1 = _getWithEtag(Uri.parse('$cleanBase/fixtures/$fixtureId/stats'), apiKey);
+      final f2 = _getWithEtag(Uri.parse('$cleanBase/fixtures/$fixtureId/lineups'), apiKey);
 
-      final results = await Future.wait(futures);
+      final r0 = await f0;
+      final r1 = await f1;
+      final r2 = await f2;
 
       JsonMap? fixtureObj;
-      if (results[0].statusCode == 200) {
-        final d0 = jsonDecode(utf8.decode(results[0].bodyBytes, allowMalformed: true));
+      if (r0.statusCode == 200) {
+        final d0 = jsonDecode(utf8.decode(r0.bodyBytes, allowMalformed: true));
         if (d0 is Map && d0['fixture'] is JsonMap) {
           fixtureObj = d0['fixture'];
         }
@@ -871,8 +1031,8 @@ class SportApiService {
 
       JsonMap? homeStats;
       JsonMap? awayStats;
-      if (results[1].statusCode == 200) {
-        final d1 = jsonDecode(utf8.decode(results[1].bodyBytes, allowMalformed: true));
+      if (r1.statusCode == 200) {
+        final d1 = jsonDecode(utf8.decode(r1.bodyBytes, allowMalformed: true));
         if (d1 is Map && d1['available'] == true && d1['data'] is Map) {
           homeStats = d1['data']['home'] as JsonMap?;
           awayStats = d1['data']['away'] as JsonMap?;
@@ -885,8 +1045,8 @@ class SportApiService {
       final JsonList awayStarters = [];
       final JsonList awaySubs = [];
 
-      if (results[2].statusCode == 200) {
-        final d2 = jsonDecode(utf8.decode(results[2].bodyBytes, allowMalformed: true));
+      if (r2.statusCode == 200) {
+        final d2 = jsonDecode(utf8.decode(r2.bodyBytes, allowMalformed: true));
         if (d2 is Map && d2['available'] == true && d2['data'] is Map) {
           lineupsAvail = true;
           final hObj = d2['data']['home'];
@@ -957,7 +1117,7 @@ class SportApiService {
 }
 
 // ==========================================
-// 4. CSAPATLOGÓ KOMPONENS (VALÓDI API + FALLBACK)
+// 4. CSAPATLOGÓ & W-D-L FORMA KOMPONENSEK
 // ==========================================
 
 class TeamLogoBadge extends StatelessWidget {
@@ -1022,6 +1182,44 @@ class TeamLogoBadge extends StatelessWidget {
   }
 }
 
+class WdlStrip extends StatelessWidget {
+  final StringList codes;
+
+  const WdlStrip({super.key, required this.codes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: codes.take(5).map((c) {
+        final up = c.toUpperCase();
+        Color bg = const Color(0xFF374151);
+        String hu = 'D';
+        if (up == 'W') {
+          bg = const Color(0xFF10B981);
+          hu = 'GY';
+        } else if (up == 'L') {
+          bg = const Color(0xFFEF4444);
+          hu = 'V';
+        }
+        return Container(
+          margin: const EdgeInsets.only(right: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+          child: Text(
+            hu,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: up == 'W' ? Colors.black : Colors.white,
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
 // ==========================================
 // 5. FŐ KÉPERNYŐ ÉS ÁLLAPOTKEZELÉS
 // ==========================================
@@ -1038,6 +1236,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _dayOffset = 0;
   bool _isLoadingApi = false;
   bool _isLiveMode = false;
+  bool _autoLiveRadar = false;
+  Timer? _liveTimer;
 
   String _apiKey = '';
   String _baseUrl = SportApiService.defaultBaseUrl;
@@ -1048,13 +1248,40 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   MatchList _matches = [];
   BetList _bets = [];
   final StringList _slipMatchIds = [];
-  final Map<String, double> _customOddsMap = {};
+  final StringDoubleMap _customOddsMap = {};
 
   @override
   void initState() {
     super.initState();
     _matches = _buildDemoMatches();
     _loadSavedData();
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    super.dispose();
+  }
+
+  void _toggleAutoLiveRadar() {
+    setState(() {
+      _autoLiveRadar = !_autoLiveRadar;
+    });
+    _liveTimer?.cancel();
+    if (_autoLiveRadar) {
+      _liveTimer = Timer.periodic(const Duration(seconds: 75), (_) {
+        if (_apiKey.isNotEmpty && !_isLoadingApi) {
+          _syncSportApi(silent: true);
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Élő Radar aktiválva (75 mp ETag frissítés).')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Élő Radar kikapcsolva.')),
+      );
+    }
   }
 
   MatchList _buildDemoMatches() {
@@ -1067,7 +1294,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         awayTeam: 'Aston Villa',
         market: 'Mindkét csapat szerez gólt (BTTS)',
         marketCode: 'btts',
-        trendSummary: 'Az utolsó 6 bajnoki meccsből 5-ször mindkét fél betalált, magas támadó xG-mutatókkal.',
+        trendSummary: 'Dixon-Coles: az utolsó 6 bajnoki meccsből 5-ször mindkét fél betalált.',
         trendCategory: 'Gólok / BTTS',
         modelProb: PoissonEngine.calculate(2.15, 1.48).btts,
         marketOdds: 1.72,
@@ -1075,6 +1302,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         homeXg: 2.15,
         awayXg: 1.48,
         last6Trend: [true, true, true, false, true, true],
+        homeFormCodes: ['W', 'W', 'D', 'W', 'W'],
+        awayFormCodes: ['W', 'L', 'W', 'D', 'W'],
         isWatched: true,
       ),
       MatchPick(
@@ -1085,7 +1314,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         awayTeam: 'Paksi FC',
         market: '2.5 gól felett',
         marketCode: 'over25',
-        trendSummary: 'A Paks idegenbeli meccsein 3.4-es a gólátlag, az FTC hazai xG-je 2.35.',
+        trendSummary: 'Dixon-Coles: a Paks idegenbeli meccsein 3.4-es a gólátlag, az FTC hazai xG-je 2.35.',
         trendCategory: 'Gólok / BTTS',
         modelProb: PoissonEngine.calculate(2.35, 1.32).over25,
         marketOdds: 1.65,
@@ -1093,6 +1322,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         homeXg: 2.35,
         awayXg: 1.32,
         last6Trend: [true, true, true, true, false, true],
+        homeFormCodes: ['W', 'W', 'W', 'D', 'W'],
+        awayFormCodes: ['W', 'W', 'L', 'W', 'D'],
         isWatched: true,
       ),
       MatchPick(
@@ -1103,7 +1334,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         awayTeam: 'Villarreal',
         market: 'Hazai győzelem (1)',
         marketCode: 'home',
-        trendSummary: 'Tabella & xG előny: a Sociedad hazai pályán dominál, 1.98-as várható góllal.',
+        trendSummary: 'Dixon-Coles & xG előny: a Sociedad hazai pályán dominál, 1.98-as várható góllal.',
         trendCategory: 'Tabella & Forma',
         modelProb: PoissonEngine.calculate(1.98, 1.05).homeWin,
         marketOdds: 2.15,
@@ -1111,6 +1342,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         homeXg: 1.98,
         awayXg: 1.05,
         last6Trend: [true, false, true, true, true, true],
+        homeFormCodes: ['W', 'D', 'W', 'W', 'L'],
+        awayFormCodes: ['L', 'D', 'L', 'W', 'D'],
       ),
     ];
   }
@@ -1128,7 +1361,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final savedBankroll = prefs.getDouble('bankroll') ?? 50000;
     final watchedIds = prefs.getStringList('watched_ids') ?? [];
     final betsJson = prefs.getString('logged_bets');
-    final cachedMatchesJson = prefs.getString('cached_matches_v3');
+    final cachedMatchesJson = prefs.getString('cached_matches_v4');
     final customOddsJson = prefs.getString('custom_odds_map');
 
     setState(() {
@@ -1196,7 +1429,64 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     await prefs.setString('logged_bets', jsonEncode(_bets.map((b) => b.toJson()).toList()));
     await prefs.setString('custom_odds_map', jsonEncode(_customOddsMap));
     if (_isLiveMode && _matches.isNotEmpty) {
-      await prefs.setString('cached_matches_v3', jsonEncode(_matches.map((m) => m.toJson()).toList()));
+      await prefs.setString('cached_matches_v4', jsonEncode(_matches.map((m) => m.toJson()).toList()));
+    }
+  }
+
+  String _exportBackupJson() {
+    final backup = <String, dynamic>{
+      'version': 4,
+      'apiKey': _apiKey,
+      'baseUrl': _baseUrl,
+      'bankroll': _bankroll,
+      'customOdds': _customOddsMap,
+      'watchedIds': _matches.where((m) => m.isWatched).map((m) => m.id).toList(),
+      'bets': _bets.map((b) => b.toJson()).toList(),
+    };
+    return jsonEncode(backup);
+  }
+
+  Future<bool> _importBackupJson(String rawJson) async {
+    try {
+      final decoded = jsonDecode(rawJson.trim());
+      if (decoded is! Map) return false;
+
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        if (decoded['apiKey'] is String) _apiKey = decoded['apiKey'];
+        if (decoded['baseUrl'] is String) _baseUrl = decoded['baseUrl'];
+        if (decoded['bankroll'] is num) _bankroll = (decoded['bankroll'] as num).toDouble();
+
+        if (decoded['customOdds'] is Map) {
+          _customOddsMap.clear();
+          (decoded['customOdds'] as Map).forEach((k, v) {
+            if (v is num) _customOddsMap[k.toString()] = v.toDouble();
+          });
+        }
+
+        if (decoded['bets'] is List) {
+          final BetList imported = [];
+          for (final item in decoded['bets']) {
+            if (item is JsonMap) {
+              imported.add(BetRecord.fromJson(item));
+            }
+          }
+          _bets = imported;
+        }
+      });
+
+      if (decoded['watchedIds'] is List) {
+        final StringList wList = (decoded['watchedIds'] as List).map((e) => e.toString()).toList();
+        await prefs.setStringList('watched_ids', wList);
+      }
+
+      await _saveState();
+      if (_apiKey.isNotEmpty) {
+        _syncSportApi(silent: true);
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -1244,7 +1534,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
       if (result.success && result.matches.isNotEmpty) {
         if (result.matches.any((m) => m.isHighPressure)) {
-          HapticFeedback.mediumImpact();
+          HapticFeedback.heavyImpact();
         }
         _saveState();
         _autoSettlePendingBets(result.matches);
@@ -1276,6 +1566,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       );
       if (table.isEmpty || !mounted) continue;
 
+      final lAvg = SportApiService.leagueAvgGoals(table);
+
       for (int i = 0; i < _matches.length; i++) {
         final m = _matches[i];
         if (m.leagueId != lid || m.hasStandingData) continue;
@@ -1283,8 +1575,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         final aInfo = m.awayId != null ? table[m.awayId!] : null;
 
         if (hInfo != null && aInfo != null && hInfo.played > 0 && aInfo.played > 0) {
-          final realHomeXg = ((hInfo.avgGoalsFor + aInfo.avgGoalsAgainst) / 2.0 * 1.12).clamp(0.45, 3.6);
-          final realAwayXg = ((aInfo.avgGoalsFor + hInfo.avgGoalsAgainst) / 2.0 * 0.94).clamp(0.35, 3.2);
+          final hAttack = hInfo.avgGoalsFor / lAvg;
+          final aDefense = aInfo.avgGoalsAgainst / lAvg;
+          final aAttack = aInfo.avgGoalsFor / lAvg;
+          final hDefense = hInfo.avgGoalsAgainst / lAvg;
+
+          final realHomeXg = (hAttack * aDefense * lAvg * 1.12).clamp(0.45, 3.6);
+          final realAwayXg = (aAttack * hDefense * lAvg * 0.94).clamp(0.35, 3.2);
           final trend = SportApiService._extractFormTrend(hInfo, aInfo);
 
           _matches[i] = SportApiService._buildPickFromXg(
@@ -1305,6 +1602,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             homeXg: realHomeXg,
             awayXg: realAwayXg,
             last6Trend: trend,
+            homeFormCodes: SportApiService.extractWdlCodes(hInfo),
+            awayFormCodes: SportApiService.extractWdlCodes(aInfo),
             homePos: hInfo.position,
             awayPos: aInfo.position,
             hasStandingData: true,
@@ -1334,14 +1633,25 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
       final hs = match.homeScore!;
       final as = match.awayScore!;
-      bool won = false;
-      if (bet.marketCode == 'home') {
-        won = hs > as;
-      } else if (bet.marketCode == 'over25') {
-        won = (hs + as) > 2;
-      } else if (bet.marketCode == 'btts') {
-        won = hs > 0 && as > 0;
+      String newStatus = 'lost';
+
+      if (bet.marketCode == 'home' && hs > as) newStatus = 'won';
+      if (bet.marketCode == 'away' && as > hs) newStatus = 'won';
+      if (bet.marketCode == 'draw' && hs == as) newStatus = 'won';
+      if (bet.marketCode == '1x' && hs >= as) newStatus = 'won';
+      if (bet.marketCode == 'x2' && as >= hs) newStatus = 'won';
+      if (bet.marketCode == 'dnb_home') {
+        if (hs > as) {
+          newStatus = 'won';
+        } else if (hs == as) {
+          newStatus = 'void';
+        }
       }
+      if (bet.marketCode == 'over15' && (hs + as) > 1) newStatus = 'won';
+      if (bet.marketCode == 'over25' && (hs + as) > 2) newStatus = 'won';
+      if (bet.marketCode == 'under25' && (hs + as) <= 2) newStatus = 'won';
+      if (bet.marketCode == 'btts' && hs > 0 && as > 0) newStatus = 'won';
+      if (bet.marketCode == 'home_over15' && hs > 1) newStatus = 'won';
 
       _bets[i] = BetRecord(
         id: bet.id,
@@ -1350,8 +1660,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         market: bet.market,
         marketCode: bet.marketCode,
         odds: bet.odds,
+        closingOdds: bet.closingOdds,
         stake: bet.stake,
-        status: won ? 'won' : 'lost',
+        status: newStatus,
         date: bet.date,
       );
       changed = true;
@@ -1430,7 +1741,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 setState(() {
                   _customOddsMap.remove(match.id);
                   final fair = 1.0 / match.modelProb;
-                  match.marketOdds = double.parse((fair * 1.08).clamp(1.30, 4.20).toStringAsFixed(2));
+                  match.marketOdds = double.parse((fair * 1.08).clamp(1.20, 5.20).toStringAsFixed(2));
                   match.isCustomOdds = false;
                 });
                 _saveState();
@@ -1453,6 +1764,70 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 Navigator.pop(context);
               },
               child: const Text('Alkalmaz'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _openEditClosingOddsDialog(BetRecord bet) {
+    final controller = TextEditingController(
+      text: bet.closingOdds != null ? bet.closingOdds!.toStringAsFixed(2) : '',
+    );
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF131A29),
+          title: const Text('Záró odds (CLV mérés)', style: TextStyle(fontSize: 17)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(bet.matchTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('Megtett szorzó: ${bet.odds.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Kezdés előtti záró szorzó (pl. 1.72)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Mégse'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final parsed = double.tryParse(controller.text.replaceAll(',', '.'));
+                setState(() {
+                  final idx = _bets.indexWhere((b) => b.id == bet.id);
+                  if (idx != -1) {
+                    _bets[idx] = BetRecord(
+                      id: bet.id,
+                      fixtureId: bet.fixtureId,
+                      matchTitle: bet.matchTitle,
+                      market: bet.market,
+                      marketCode: bet.marketCode,
+                      odds: bet.odds,
+                      closingOdds: parsed,
+                      stake: bet.stake,
+                      status: bet.status,
+                      date: bet.date,
+                    );
+                  }
+                });
+                _saveState();
+                Navigator.pop(context);
+              },
+              child: const Text('Mentés'),
             ),
           ],
         );
@@ -1590,7 +1965,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         final now = DateTime.now();
                         final dateLabel =
                             '${now.month.toString().padLeft(2, '0')}.${now.day.toString().padLeft(2, '0')}.';
-                        final title = 'Kombi (${currentPicks.length} meccs): ${currentPicks.map((e) => e.homeTeam).join(', ')}';
+                        final title =
+                            'Kombi (${currentPicks.length} meccs): ${currentPicks.map((e) => e.homeTeam).join(', ')}';
                         setState(() {
                           _bets.insert(
                             0,
@@ -1631,9 +2007,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
-  void _addBet(MatchPick match, double stake) {
+  void _addBet(MatchPick match, double stake, {MarketOption? chosenMarket}) {
     final now = DateTime.now();
     final dateLabel = '${now.month.toString().padLeft(2, '0')}.${now.day.toString().padLeft(2, '0')}.';
+    final mLabel = chosenMarket?.label ?? match.market;
+    final mCode = chosenMarket?.code ?? match.marketCode;
+    final mOdds = chosenMarket?.refOdds ?? match.marketOdds;
+
     setState(() {
       _bets.insert(
         0,
@@ -1641,9 +2021,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           fixtureId: match.fixtureId,
           matchTitle: '${match.homeTeam} – ${match.awayTeam}',
-          market: match.market,
-          marketCode: match.marketCode,
-          odds: match.marketOdds,
+          market: mLabel,
+          marketCode: mCode,
+          odds: mOdds,
           stake: stake,
           status: 'pending',
           date: dateLabel,
@@ -1652,7 +2032,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     });
     _saveState();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Tipp rögzítve a naplóba (${stake.round()} Ft)!')),
+      SnackBar(content: Text('Tipp rögzítve: $mLabel (${stake.round()} Ft)!')),
     );
   }
 
@@ -1668,6 +2048,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           market: old.market,
           marketCode: old.marketCode,
           odds: old.odds,
+          closingOdds: old.closingOdds,
           stake: old.stake,
           status: newStatus,
           date: old.date,
@@ -1687,6 +2068,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   void _openSettingsDialog() {
     final keyController = TextEditingController(text: _apiKey);
     final baseController = TextEditingController(text: _baseUrl);
+    final backupController = TextEditingController();
     String testOutput = _lastApiStatus;
     bool testing = false;
 
@@ -1701,7 +2083,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 children: [
                   Icon(Icons.api, color: Color(0xFF10B981)),
                   SizedBox(width: 8),
-                  Text('SportAPI.ai Beállítások', style: TextStyle(fontSize: 18)),
+                  Text('Beállítások & Mentés', style: TextStyle(fontSize: 18)),
                 ],
               ),
               content: SingleChildScrollView(
@@ -1710,8 +2092,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Végpont: GET /api/fixtures/date/{date}\nFejléc: X-Api-Key + ETag gyorsítótár',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF10B981)),
+                      'SportAPI.ai (X-Api-Key + ETag gyorsítótár)',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
                     ),
                     if (_rateLimitRemaining != null) ...[
                       const SizedBox(height: 4),
@@ -1720,7 +2102,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
                       ),
                     ],
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: keyController,
                       decoration: const InputDecoration(
@@ -1729,7 +2111,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         isDense: true,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: baseController,
                       decoration: const InputDecoration(
@@ -1738,7 +2120,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         isDense: true,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
@@ -1783,6 +2165,60 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
                       ),
                     ),
+                    const Divider(height: 24, color: Color(0xFF1F2937)),
+                    const Text(
+                      'JSON Biztonsági Mentés (Újratelepítéshez)',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF3B82F6), fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              final jsonStr = _exportBackupJson();
+                              Clipboard.setData(ClipboardData(text: jsonStr));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Teljes biztonsági mentés vágólapra másolva!')),
+                              );
+                            },
+                            icon: const Icon(Icons.copy, size: 15),
+                            label: const Text('Mentés másolása', style: TextStyle(fontSize: 11)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: backupController,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'JSON visszaállítás beillesztése...',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final ok = await _importBackupJson(backupController.text);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(ok
+                                    ? 'Adatok sikeresen visszaállítva!'
+                                    : 'Hibás JSON formátum!'),
+                              ),
+                            );
+                            if (ok) Navigator.pop(context);
+                          }
+                        },
+                        icon: const Icon(Icons.restore, size: 15),
+                        label: const Text('Adatok visszaállítása', style: TextStyle(fontSize: 11)),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1821,8 +2257,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
-  void _openLogBetDialog(MatchPick match) {
+  void _openLogBetDialog(MatchPick match, {MarketOption? chosenMarket}) {
     double stake = (_bankroll * 0.03).clamp(500, 50000).roundToDouble();
+    final label = chosenMarket?.label ?? match.market;
+    final odds = chosenMarket?.refOdds ?? match.marketOdds;
+
     showDialog(
       context: context,
       builder: (context) {
@@ -1837,8 +2276,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 children: [
                   Text('${match.homeTeam} – ${match.awayTeam}',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('${match.market} @ ${match.marketOdds}',
-                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 13)),
+                  Text('$label @ $odds', style: const TextStyle(color: Color(0xFF10B981), fontSize: 13)),
                   const SizedBox(height: 16),
                   Text('Tét: ${stake.round()} Ft', style: const TextStyle(fontWeight: FontWeight.bold)),
                   Slider(
@@ -1850,7 +2288,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     onChanged: (v) => setDialogState(() => stake = v),
                   ),
                   Text(
-                    'Várható nyeremény: ${(stake * match.marketOdds).round()} Ft',
+                    'Várható nyeremény: ${(stake * odds).round()} Ft',
                     style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                   ),
                 ],
@@ -1862,7 +2300,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    _addBet(match, stake);
+                    _addBet(match, stake, chosenMarket: chosenMarket);
                     Navigator.pop(context);
                   },
                   child: const Text('Rögzítés'),
@@ -1876,7 +2314,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
   void _openMatchDetail(MatchPick match) {
-    final poisson = match.poisson;
     Future<FixtureFullBundle?>? bundleFuture;
     if (_apiKey.isNotEmpty && match.fixtureId != null && match.fixtureId! > 0) {
       bundleFuture = SportApiService.fetchFullBundle(
@@ -1886,6 +2323,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         leagueId: match.leagueId,
       );
     }
+
+    double homeModifier = 1.0;
+    double awayModifier = 1.0;
 
     showModalBottomSheet(
       context: context,
@@ -1899,8 +2339,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           length: 4,
           child: StatefulBuilder(
             builder: (context, setModalState) {
+              final adjHomeXg = (match.homeXg * homeModifier).clamp(0.25, 4.5);
+              final adjAwayXg = (match.awayXg * awayModifier).clamp(0.25, 4.5);
+              final poisson = PoissonEngine.calculate(adjHomeXg, adjAwayXg);
+
               return SizedBox(
-                height: MediaQuery.of(context).size.height * 0.85,
+                height: MediaQuery.of(context).size.height * 0.86,
                 child: Column(
                   children: [
                     const SizedBox(height: 10),
@@ -2016,7 +2460,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                       labelColor: Color(0xFF10B981),
                       unselectedLabelColor: Color(0xFF9CA3AF),
                       tabs: [
-                        Tab(text: 'Esélyek & xG'),
+                        Tab(text: 'Dixon-Coles & Piacok'),
                         Tab(text: 'Statisztika'),
                         Tab(text: 'Kezdőcsapatok'),
                         Tab(text: 'Tabella'),
@@ -2031,11 +2475,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
                           return TabBarView(
                             children: [
-                              // 1. FÜL: ESÉLYEK & xG
+                              // 1. FÜL: DIXON-COLES & ÖSSZES PIAC
                               ListView(
                                 padding: const EdgeInsets.all(20),
                                 children: [
-                                  const Text('Poisson 1X2 Valószínűség',
+                                  const Text('Dixon-Coles 1X2 Valószínűség',
                                       style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
                                   const SizedBox(height: 8),
                                   ClipRRect(
@@ -2082,7 +2526,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(height: 14),
                                   const Text('Legvalószínűbb pontos végeredmények',
                                       style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
                                   const SizedBox(height: 8),
@@ -2109,13 +2553,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                       );
                                     }).toList(),
                                   ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(height: 14),
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text('Várható gólok (xG): ${match.homeXg.toStringAsFixed(2)}',
+                                      Text('Kalibrált xG: ${adjHomeXg.toStringAsFixed(2)}',
                                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                                      Text(match.awayXg.toStringAsFixed(2),
+                                      Text(adjAwayXg.toStringAsFixed(2),
                                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                                     ],
                                   ),
@@ -2123,38 +2567,68 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(6),
                                     child: LinearProgressIndicator(
-                                      value: match.homeXg / (match.homeXg + match.awayXg),
+                                      value: adjHomeXg / (adjHomeXg + adjAwayXg),
                                       minHeight: 8,
                                       backgroundColor: const Color(0xFF3B82F6),
                                       valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
                                     ),
                                   ),
                                   const SizedBox(height: 16),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      const Text('Odds-mozgás', style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
-                                      TextButton.icon(
-                                        onPressed: () {
-                                          Navigator.pop(context);
-                                          _openEditOddsDialog(match);
-                                        },
-                                        icon: const Icon(Icons.edit, size: 15),
-                                        label: Text('Szorzó: ${match.marketOdds.toStringAsFixed(2)}'),
+                                  const Text('Összes kiszámolt piac (Koppints a naplózáshoz)',
+                                      style: TextStyle(
+                                          fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                                  const SizedBox(height: 8),
+                                  ...poisson.allMarkets.map((opt) {
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 6),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF0A0E17),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: const Color(0xFF1F2937)),
                                       ),
-                                    ],
-                                  ),
-                                  Container(
-                                    height: 56,
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF0A0E17),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: CustomPaint(painter: SparklinePainter(match.oddsHistory)),
-                                  ),
-                                  const SizedBox(height: 18),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(opt.label,
+                                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                Text(
+                                                  'Esély: ${(opt.probability * 100).round()}% • Fair: ${opt.fairOdds}',
+                                                  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () {
+                                              Navigator.pop(context);
+                                              _openLogBetDialog(match, chosenMarket: opt);
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                              decoration: BoxDecoration(
+                                                color: const Color.fromRGBO(16, 185, 129, 0.18),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                '+ ${opt.refOdds}',
+                                                style: const TextStyle(
+                                                  color: Color(0xFF10B981),
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                  const SizedBox(height: 12),
                                   Row(
                                     children: [
                                       Expanded(
@@ -2177,7 +2651,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                             _openLogBetDialog(match);
                                           },
                                           icon: const Icon(Icons.add_chart),
-                                          label: const Text('Naplózás'),
+                                          label: const Text('Fő tipp naplózása'),
                                           style: FilledButton.styleFrom(
                                             backgroundColor: const Color(0xFF10B981),
                                             foregroundColor: Colors.black,
@@ -2264,36 +2738,89 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                       ],
                                     ),
 
-                              // 3. FÜL: KEZDŐCSAPATOK (LINEUPS)
+                              // 3. FÜL: KEZDŐCSAPATOK & HIÁNYZÓ-MÓDOSÍTÓ
                               isLoadingBundle
                                   ? const Center(child: CircularProgressIndicator())
-                                  : (bundle == null || !bundle.lineupsAvailable)
-                                      ? const Center(
-                                          child: Padding(
-                                            padding: EdgeInsets.all(24),
-                                            child: Text(
-                                              'A kezdőcsapatok még nem kerültek kihirdetésre (általában 45-60 perccel a kezdés előtt érhetők el).',
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(color: Color(0xFF9CA3AF)),
-                                            ),
+                                  : ListView(
+                                      padding: const EdgeInsets.all(20),
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF0A0E17),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: const Color(0xFF1F2937)),
                                           ),
-                                        )
-                                      : ListView(
-                                          padding: const EdgeInsets.all(20),
-                                          children: [
-                                            Text('${match.homeTeam} – Kezdő XI',
-                                                style: const TextStyle(
-                                                    fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
-                                            const SizedBox(height: 6),
-                                            ...bundle.homeStarters.map((p) => _PlayerLineupTile(player: p)),
-                                            const SizedBox(height: 16),
-                                            Text('${match.awayTeam} – Kezdő XI',
-                                                style: const TextStyle(
-                                                    fontWeight: FontWeight.bold, color: Color(0xFF3B82F6))),
-                                            const SizedBox(height: 6),
-                                            ...bundle.awayStarters.map((p) => _PlayerLineupTile(player: p)),
-                                          ],
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Text('Kezdőcsapat / Hiányzó hatás szimulátor',
+                                                  style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: Color(0xFFF59E0B))),
+                                              const SizedBox(height: 8),
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Text('${match.homeTeam} xG:', style: const TextStyle(fontSize: 12)),
+                                                  SegmentedButton<double>(
+                                                    segments: const [
+                                                      ButtonSegment(value: 0.85, label: Text('-15%')),
+                                                      ButtonSegment(value: 1.0, label: Text('0%')),
+                                                      ButtonSegment(value: 1.10, label: Text('+10%')),
+                                                    ],
+                                                    selected: {homeModifier},
+                                                    onSelectionChanged: (s) =>
+                                                        setModalState(() => homeModifier = s.first),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Text('${match.awayTeam} xG:', style: const TextStyle(fontSize: 12)),
+                                                  SegmentedButton<double>(
+                                                    segments: const [
+                                                      ButtonSegment(value: 0.85, label: Text('-15%')),
+                                                      ButtonSegment(value: 1.0, label: Text('0%')),
+                                                      ButtonSegment(value: 1.10, label: Text('+10%')),
+                                                    ],
+                                                    selected: {awayModifier},
+                                                    onSelectionChanged: (s) =>
+                                                        setModalState(() => awayModifier = s.first),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
                                         ),
+                                        const SizedBox(height: 16),
+                                        if (bundle == null || !bundle.lineupsAvailable)
+                                          const Padding(
+                                            padding: EdgeInsets.symmetric(vertical: 20),
+                                            child: Text(
+                                              'A hivatalos kezdőcsapatok általában 45-60 perccel a kezdés előtt jelennek meg itt.',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                                            ),
+                                          )
+                                        else ...[
+                                          Text('${match.homeTeam} – Kezdő XI',
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                                          const SizedBox(height: 6),
+                                          ...bundle.homeStarters.map((p) => _PlayerLineupTile(player: p)),
+                                          const SizedBox(height: 16),
+                                          Text('${match.awayTeam} – Kezdő XI',
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold, color: Color(0xFF3B82F6))),
+                                          const SizedBox(height: 6),
+                                          ...bundle.awayStarters.map((p) => _PlayerLineupTile(player: p)),
+                                        ],
+                                      ],
+                                    ),
 
                               // 4. FÜL: TABELLA
                               isLoadingBundle
@@ -2423,6 +2950,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         onToggleWatch: _toggleWatch,
         onSelectMatch: _openMatchDetail,
         onUpdateBetStatus: _updateBetStatus,
+        onEditClosingOdds: _openEditClosingOddsDialog,
         onDeleteBet: _deleteBet,
       ),
     ];
@@ -2440,9 +2968,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         title: Row(
           children: [
             const Icon(Icons.insights, color: Color(0xFF10B981)),
-            const SizedBox(width: 8),
-            const Text('GoalEdge AI', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
+            const Text('GoalEdge AI', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -2452,7 +2980,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                _isLiveMode ? 'SPORTAPI' : 'DEMÓ',
+                _isLiveMode ? 'API' : 'DEMÓ',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -2463,6 +2991,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: Icon(
+              _autoLiveRadar ? Icons.podcasts : Icons.sensors_off,
+              color: _autoLiveRadar ? const Color(0xFFEF4444) : Colors.grey,
+            ),
+            tooltip: 'Automata Élő Radar (75 mp)',
+            onPressed: _toggleAutoLiveRadar,
+          ),
           if (_isLoadingApi)
             const Padding(
               padding: EdgeInsets.all(14),
@@ -2476,7 +3012,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            tooltip: 'SportAPI.ai Beállítások',
+            tooltip: 'Beállítások & Mentés',
             onPressed: _openSettingsDialog,
           ),
         ],
@@ -2617,6 +3153,8 @@ class ValueFeedTab extends StatefulWidget {
 
 class _ValueFeedTabState extends State<ValueFeedTab> {
   String _selectedLeague = 'Összes';
+  String _smartFilter = 'Mind';
+  String _searchQuery = '';
   bool _sortByValue = true;
 
   @override
@@ -2630,8 +3168,19 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
       _selectedLeague = 'Összes';
     }
 
+    final smartFilters = ['Mind', '+5% EV felett', 'Odds 1.50-2.30', 'ÉLŐ'];
+
     final filtered = widget.matches.where((m) {
-      return _selectedLeague == 'Összes' || m.league == _selectedLeague;
+      if (_selectedLeague != 'Összes' && m.league != _selectedLeague) return false;
+      if (_searchQuery.isNotEmpty) {
+        final q = _searchQuery.toLowerCase();
+        final matchText = '${m.homeTeam} ${m.awayTeam} ${m.league}'.toLowerCase();
+        if (!matchText.contains(q)) return false;
+      }
+      if (_smartFilter == '+5% EV felett' && m.edgePercent < 5.0) return false;
+      if (_smartFilter == 'Odds 1.50-2.30' && (m.marketOdds < 1.50 || m.marketOdds > 2.30)) return false;
+      if (_smartFilter == 'ÉLŐ' && !m.isLive) return false;
+      return true;
     }).toList();
 
     filtered.sort((a, b) => _sortByValue
@@ -2641,24 +3190,72 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: -1, label: Text('Tegnap')),
-              ButtonSegment(value: 0, label: Text('Ma')),
-              ButtonSegment(value: 1, label: Text('Holnap')),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(value: -1, label: Text('Tegnap', style: TextStyle(fontSize: 12))),
+                    ButtonSegment(value: 0, label: Text('Ma', style: TextStyle(fontSize: 12))),
+                    ButtonSegment(value: 1, label: Text('Holnap', style: TextStyle(fontSize: 12))),
+                  ],
+                  selected: {widget.dayOffset},
+                  onSelectionChanged: (s) => widget.onDayChanged(s.first),
+                ),
+              ),
             ],
-            selected: {widget.dayOffset},
-            onSelectionChanged: (s) => widget.onDayChanged(s.first),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SizedBox(
+            height: 38,
+            child: TextField(
+              onChanged: (val) => setState(() => _searchQuery = val),
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Keresés csapatra vagy ligára...',
+                hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF9CA3AF)),
+                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                filled: true,
+                fillColor: const Color(0xFF131A29),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF1F2937)),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 36,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: smartFilters.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
+            itemBuilder: (context, index) {
+              final sf = smartFilters[index];
+              final sel = sf == _smartFilter;
+              return FilterChip(
+                label: Text(sf, style: TextStyle(fontSize: 11, color: sel ? Colors.black : Colors.white)),
+                selected: sel,
+                selectedColor: const Color(0xFF3B82F6),
+                onSelected: (_) => setState(() => _smartFilter = sf),
+              );
+            },
           ),
         ),
         SizedBox(
-          height: 44,
+          height: 38,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: leagues.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
             itemBuilder: (context, index) {
               final league = leagues[index];
               final selected = league == _selectedLeague;
@@ -2670,24 +3267,22 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
                 labelStyle: TextStyle(
                   color: selected ? Colors.black : Colors.white,
                   fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                  fontSize: 12,
+                  fontSize: 11,
                 ),
               );
             },
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('${filtered.length} elemzett mérkőzés',
-                  style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+              Text('${filtered.length} mérkőzés', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
               TextButton.icon(
                 onPressed: () => setState(() => _sortByValue = !_sortByValue),
-                icon: const Icon(Icons.sort, size: 16),
-                label: Text(_sortByValue ? 'Rendezés: Value %' : 'Rendezés: Esély %',
-                    style: const TextStyle(fontSize: 12)),
+                icon: const Icon(Icons.sort, size: 15),
+                label: Text(_sortByValue ? 'Value %' : 'Esély %', style: const TextStyle(fontSize: 12)),
               ),
             ],
           ),
@@ -2805,12 +3400,20 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              WdlStrip(codes: match.homeFormCodes),
+                              WdlStrip(codes: match.awayFormCodes),
+                            ],
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             match.trendSummary,
-                            style: const TextStyle(color: Color(0xFFD1D5DB), fontSize: 13),
+                            style: const TextStyle(color: Color(0xFFD1D5DB), fontSize: 12),
                           ),
-                          const Divider(height: 22, color: Color(0xFF1F2937)),
+                          const Divider(height: 20, color: Color(0xFF1F2937)),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -2818,7 +3421,7 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text('Ajánlott piac',
+                                    const Text('Ajánlott piac (Dixon-Coles)',
                                         style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
                                     Text(match.market,
                                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
@@ -3097,6 +3700,11 @@ class _CalculatorTabState extends State<CalculatorTab> {
   double _simHomeXg = 1.85;
   double _simAwayXg = 1.20;
 
+  // Monte Carlo paraméterek
+  double _mcWinRate = 0.56;
+  double _mcAvgOdds = 1.92;
+  double _mcStakePct = 0.03;
+
   @override
   Widget build(BuildContext context) {
     final ev = (_prob * _odds) - 1.0;
@@ -3106,13 +3714,38 @@ class _CalculatorTabState extends State<CalculatorTab> {
     final recommendedStake = (widget.bankroll * halfKelly).round();
     final simResult = PoissonEngine.calculate(_simHomeXg, _simAwayXg);
 
+    // Monte Carlo 40 szimuláció (100 fogadásra)
+    final CurveList mcCurves = [];
+    final DoubleList finalBalances = [];
+    for (int sim = 0; sim < 40; sim++) {
+      final rng = math.Random(1000 + sim);
+      double b = widget.bankroll;
+      final DoubleList path = [b];
+      for (int step = 0; step < 100; step++) {
+        final stake = b * _mcStakePct;
+        if (rng.nextDouble() < _mcWinRate) {
+          b += stake * (_mcAvgOdds - 1.0);
+        } else {
+          b -= stake;
+        }
+        path.add(b);
+      }
+      mcCurves.add(path);
+      finalBalances.add(b);
+    }
+    finalBalances.sort();
+    final mcWorst10 = finalBalances[4].round();
+    final mcMedian = finalBalances[20].round();
+    final mcBest10 = finalBalances[36].round();
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
       children: [
         SegmentedButton<int>(
           segments: const [
-            ButtonSegment(value: 0, label: Text('EV & Kelly Tét'), icon: Icon(Icons.percent)),
-            ButtonSegment(value: 1, label: Text('Poisson Szimulátor'), icon: Icon(Icons.sports_soccer)),
+            ButtonSegment(value: 0, label: Text('EV & Kelly', style: TextStyle(fontSize: 12))),
+            ButtonSegment(value: 1, label: Text('Dixon-Coles', style: TextStyle(fontSize: 12))),
+            ButtonSegment(value: 2, label: Text('Monte Carlo', style: TextStyle(fontSize: 12))),
           ],
           selected: {_mode},
           onSelectionChanged: (s) => setState(() => _mode = s.first),
@@ -3194,14 +3827,16 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   const Divider(height: 22, color: Color(0xFF1F2937)),
                   _CalcRow(
                     label: 'Ajánlott tét (Half-Kelly)',
-                    value: ev > 0 ? '$recommendedStake Ft (${(halfKelly * 100).toStringAsFixed(1)}%)' : '0 Ft (Nincs előny)',
+                    value: ev > 0
+                        ? '$recommendedStake Ft (${(halfKelly * 100).toStringAsFixed(1)}%)'
+                        : '0 Ft (Nincs előny)',
                     valueColor: ev > 0 ? const Color(0xFF10B981) : const Color(0xFF9CA3AF),
                   ),
                 ],
               ),
             ),
           ),
-        ] else ...[
+        ] else if (_mode == 1) ...[
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -3244,7 +3879,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   ),
                   const Divider(height: 20, color: Color(0xFF1F2937)),
                   _CalcRow(
-                    label: 'Döntetlen (X)',
+                    label: 'Döntetlen (X - Dixon-Coles)',
                     value:
                         '${(simResult.draw * 100).toStringAsFixed(1)}% (Fair: ${(1 / simResult.draw).toStringAsFixed(2)})',
                     valueColor: Colors.white,
@@ -3261,6 +3896,85 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     label: '2.5 gól felett / BTTS',
                     value: '${(simResult.over25 * 100).round()}% / ${(simResult.btts * 100).round()}%',
                     valueColor: const Color(0xFFF59E0B),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ] else ...[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Monte Carlo Tőkeszimulátor (100 fogadás)',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                  const SizedBox(height: 10),
+                  Text('Találati arány: ${(_mcWinRate * 100).round()}%',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Slider(
+                    value: _mcWinRate,
+                    min: 0.35,
+                    max: 0.78,
+                    activeColor: const Color(0xFF10B981),
+                    onChanged: (v) => setState(() => _mcWinRate = v),
+                  ),
+                  Text('Átlagos szorzó: ${_mcAvgOdds.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Slider(
+                    value: _mcAvgOdds,
+                    min: 1.35,
+                    max: 3.20,
+                    activeColor: const Color(0xFF3B82F6),
+                    onChanged: (v) => setState(() => _mcAvgOdds = v),
+                  ),
+                  Text('Tétméret: ${(_mcStakePct * 100).toStringAsFixed(1)}% / tipp',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Slider(
+                    value: _mcStakePct,
+                    min: 0.01,
+                    max: 0.08,
+                    activeColor: const Color(0xFFF59E0B),
+                    onChanged: (v) => setState(() => _mcStakePct = v),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                children: [
+                  Container(
+                    height: 130,
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0A0E17),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: CustomPaint(painter: MonteCarloPainter(mcCurves, widget.bankroll)),
+                  ),
+                  const SizedBox(height: 12),
+                  _CalcRow(
+                    label: 'Medián tőke (100 tipp után)',
+                    value: '$mcMedian Ft',
+                    valueColor: const Color(0xFF10B981),
+                  ),
+                  const Divider(height: 16, color: Color(0xFF1F2937)),
+                  _CalcRow(
+                    label: 'Optimista sáv (Top 10%)',
+                    value: '$mcBest10 Ft',
+                    valueColor: const Color(0xFF3B82F6),
+                  ),
+                  const Divider(height: 16, color: Color(0xFF1F2937)),
+                  _CalcRow(
+                    label: 'Pesszimista sáv (Alsó 10%)',
+                    value: '$mcWorst10 Ft',
+                    valueColor: const Color(0xFFEF4444),
                   ),
                 ],
               ),
@@ -3297,6 +4011,7 @@ class TrackerAndWatchlistTab extends StatefulWidget {
   final Function(String) onToggleWatch;
   final Function(MatchPick) onSelectMatch;
   final Function(String, String) onUpdateBetStatus;
+  final Function(BetRecord) onEditClosingOdds;
   final Function(String) onDeleteBet;
 
   const TrackerAndWatchlistTab({
@@ -3306,6 +4021,7 @@ class TrackerAndWatchlistTab extends StatefulWidget {
     required this.onToggleWatch,
     required this.onSelectMatch,
     required this.onUpdateBetStatus,
+    required this.onEditClosingOdds,
     required this.onDeleteBet,
   });
 
@@ -3318,14 +4034,18 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
 
   @override
   Widget build(BuildContext context) {
-    final settledBets = widget.bets.where((b) => b.status != 'pending').toList();
+    final settledBets = widget.bets.where((b) => b.status == 'won' || b.status == 'lost').toList();
     final totalStaked = settledBets.fold<double>(0.0, (sum, b) => sum + b.stake);
     final totalProfit = settledBets.fold<double>(0.0, (sum, b) => sum + b.profit);
     final wonCount = settledBets.where((b) => b.status == 'won').length;
     final winRate = settledBets.isEmpty ? 0.0 : (wonCount / settledBets.length) * 100;
     final roi = totalStaked == 0 ? 0.0 : (totalProfit / totalStaked) * 100;
 
-    // Kumulált profit görbe pontjai (időrendben)
+    final clvBets = widget.bets.where((b) => b.clvPercent != null).toList();
+    final avgClv = clvBets.isEmpty
+        ? null
+        : clvBets.fold<double>(0.0, (sum, b) => sum + b.clvPercent!) / clvBets.length;
+
     final DoubleList equityCurve = [0.0];
     double running = 0.0;
     for (final b in settledBets.reversed) {
@@ -3360,7 +4080,7 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
                         _KpiItem(
-                          label: 'Nettó Profit',
+                          label: 'Profit',
                           value: '${totalProfit >= 0 ? '+' : ''}${totalProfit.round()} Ft',
                           color: totalProfit >= 0 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
                         ),
@@ -3370,16 +4090,25 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
                           color: roi >= 0 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
                         ),
                         _KpiItem(
-                          label: 'Találati arány',
+                          label: 'Találat',
                           value: '${winRate.round()}%',
                           color: Colors.white,
+                        ),
+                        _KpiItem(
+                          label: 'Átl. CLV',
+                          value: avgClv == null
+                              ? '-'
+                              : '${avgClv >= 0 ? '+' : ''}${avgClv.toStringAsFixed(1)}%',
+                          color: avgClv != null && avgClv >= 0
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFF3B82F6),
                         ),
                       ],
                     ),
                     if (equityCurve.length >= 2) ...[
                       const SizedBox(height: 12),
                       Container(
-                        height: 64,
+                        height: 60,
                         width: double.infinity,
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
@@ -3408,6 +4137,7 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
                     itemCount: widget.bets.length,
                     itemBuilder: (context, index) {
                       final bet = widget.bets[index];
+                      final clv = bet.clvPercent;
                       return Card(
                         margin: const EdgeInsets.only(bottom: 10),
                         child: Padding(
@@ -3428,8 +4158,37 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
                                   ),
                                 ],
                               ),
-                              Text('${bet.market} • Odds: ${bet.odds} • Tét: ${bet.stake.round()} Ft',
-                                  style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text('${bet.market} • Odds: ${bet.odds} • Tét: ${bet.stake.round()} Ft',
+                                        style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () => widget.onEditClosingOdds(bet),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF1F2937),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        clv != null
+                                            ? 'CLV: ${clv >= 0 ? '+' : ''}${clv.toStringAsFixed(1)}%'
+                                            : '+ Záró odds',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: clv != null && clv >= 0
+                                              ? const Color(0xFF10B981)
+                                              : const Color(0xFF3B82F6),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               const SizedBox(height: 10),
                               Row(
                                 children: [
@@ -3439,19 +4198,26 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
                                     color: const Color(0xFF10B981),
                                     onTap: () => widget.onUpdateBetStatus(bet.id, 'won'),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 6),
                                   _StatusChip(
                                     label: 'Veszített',
                                     active: bet.status == 'lost',
                                     color: const Color(0xFFEF4444),
                                     onTap: () => widget.onUpdateBetStatus(bet.id, 'lost'),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 6),
                                   _StatusChip(
                                     label: 'Függőben',
                                     active: bet.status == 'pending',
                                     color: const Color(0xFFF59E0B),
                                     onTap: () => widget.onUpdateBetStatus(bet.id, 'pending'),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _StatusChip(
+                                    label: 'Tét vissza',
+                                    active: bet.status == 'void',
+                                    color: const Color(0xFF9CA3AF),
+                                    onTap: () => widget.onUpdateBetStatus(bet.id, 'void'),
                                   ),
                                 ],
                               ),
@@ -3513,7 +4279,7 @@ class _KpiItem extends StatelessWidget {
       children: [
         Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
         const SizedBox(height: 4),
-        Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+        Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
       ],
     );
   }
@@ -3537,7 +4303,7 @@ class _StatusChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: active ? color : const Color(0xFF1F2937),
           borderRadius: BorderRadius.circular(8),
@@ -3545,7 +4311,7 @@ class _StatusChip extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: FontWeight.bold,
             color: active ? Colors.black : Colors.white,
           ),
@@ -3556,42 +4322,8 @@ class _StatusChip extends StatelessWidget {
 }
 
 // ==========================================
-// 7. GRAFIKON RAJZOLÓK (SPARKLINE & ROI)
+// 7. GRAFIKON RAJZOLÓK (SPARKLINE, ROI, MONTE CARLO)
 // ==========================================
-
-class SparklinePainter extends CustomPainter {
-  final DoubleList points;
-
-  SparklinePainter(this.points);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.length < 2) return;
-    final minVal = points.reduce((a, b) => a < b ? a : b);
-    final maxVal = points.reduce((a, b) => a > b ? a : b);
-    final range = (maxVal - minVal) == 0 ? 1.0 : (maxVal - minVal);
-
-    final paint = Paint()
-      ..color = const Color(0xFF10B981)
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    for (int i = 0; i < points.length; i++) {
-      final x = (i / (points.length - 1)) * size.width;
-      final y = size.height - (((points[i] - minVal) / range) * size.height);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
 
 class RoiCurvePainter extends CustomPainter {
   final DoubleList values;
@@ -3605,7 +4337,6 @@ class RoiCurvePainter extends CustomPainter {
     final maxVal = math.max(0.0, values.reduce((a, b) => a > b ? a : b));
     final range = (maxVal - minVal) == 0 ? 1.0 : (maxVal - minVal);
 
-    // 0 Ft alapvonal
     final zeroY = size.height - (((0.0 - minVal) / range) * size.height);
     final zeroPaint = Paint()
       ..color = const Color(0xFF374151)
@@ -3629,6 +4360,77 @@ class RoiCurvePainter extends CustomPainter {
       }
     }
     canvas.drawPath(path, linePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+class MonteCarloPainter extends CustomPainter {
+  final CurveList curves;
+  final double initialBankroll;
+
+  MonteCarloPainter(this.curves, this.initialBankroll);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (curves.isEmpty || curves.first.length < 2) return;
+
+    double minVal = initialBankroll;
+    double maxVal = initialBankroll;
+    for (final c in curves) {
+      for (final v in c) {
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+      }
+    }
+    final range = (maxVal - minVal) == 0 ? 1.0 : (maxVal - minVal);
+
+    final baseY = size.height - (((initialBankroll - minVal) / range) * size.height);
+    final basePaint = Paint()
+      ..color = const Color(0xFF374151)
+      ..strokeWidth = 1.0;
+    canvas.drawLine(Offset(0, baseY), Offset(size.width, baseY), basePaint);
+
+    final faintPaint = Paint()
+      ..color = const Color.fromRGBO(59, 130, 246, 0.22)
+      ..strokeWidth = 1.1
+      ..style = PaintingStyle.stroke;
+
+    final sortedCurves = List<DoubleList>.from(curves)
+      ..sort((a, b) => a.last.compareTo(b.last));
+
+    for (final c in sortedCurves) {
+      final path = Path();
+      for (int i = 0; i < c.length; i++) {
+        final x = (i / (c.length - 1)) * size.width;
+        final y = size.height - (((c[i] - minVal) / range) * size.height);
+        if (i == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(path, faintPaint);
+    }
+
+    // Medián pálya kiemelése zölddel
+    final medianCurve = sortedCurves[sortedCurves.length ~/ 2];
+    final medPaint = Paint()
+      ..color = const Color(0xFF10B981)
+      ..strokeWidth = 2.6
+      ..style = PaintingStyle.stroke;
+    final medPath = Path();
+    for (int i = 0; i < medianCurve.length; i++) {
+      final x = (i / (medianCurve.length - 1)) * size.width;
+      final y = size.height - (((medianCurve[i] - minVal) / range) * size.height);
+      if (i == 0) {
+        medPath.moveTo(x, y);
+      } else {
+        medPath.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(medPath, medPaint);
   }
 
   @override
