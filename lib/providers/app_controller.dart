@@ -76,13 +76,7 @@ class AppController extends ChangeNotifier {
           syncSportApi(silent: true);
         }
       });
-      if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-        const SnackBar(content: Text('Élő Radar aktiválva (75 mp ETag + Push értesítés).')),
-      );
     } else {
-      if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-        const SnackBar(content: Text('Élő Radar kikapcsolva.')),
-      );
     }
   }
 
@@ -370,9 +364,6 @@ class AppController extends ChangeNotifier {
   Future<SportApiResponse?> syncSportApi({bool silent = false, BuildContext? context}) async {
     if (_apiKey.trim().isEmpty) {
       if (!silent ) {
-        if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-          const SnackBar(content: Text('Add meg a SportAPI.ai kulcsodat a Beállítások (fogaskerék) menüben!')),
-        );
       }
       return null;
     }
@@ -416,9 +407,6 @@ class AppController extends ChangeNotifier {
       }
 
       if (!silent) {
-        if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-          SnackBar(content: Text(result.message)),
-        );
       }
     }
     return result;
@@ -578,9 +566,6 @@ class AppController extends ChangeNotifier {
         _slipItems.removeAt(existingIdx);
       } else {
         if (_slipItems.length >= 6) {
-          if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-            const SnackBar(content: Text('Maximum 6 kötés tehető egy kombi szelvényre!')),
-          );
           return;
         }
         _slipItems.removeWhere((s) => s.matchId == match.id);
@@ -606,9 +591,6 @@ class AppController extends ChangeNotifier {
   void generateAiSlip({required bool conservative}) {
     final candidates = _matches.where((m) => !m.isFinished && m.edgePercent > 0).toList();
     if (candidates.length < 2) {
-      if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-        const SnackBar(content: Text('Nincs elég aktív mérkőzés a szelvénygeneráláshoz!')),
-      );
       return;
     }
 
@@ -671,7 +653,6 @@ class AppController extends ChangeNotifier {
     
     notifyListeners();
     HapticFeedback.mediumImpact();
-    openComboSlipSheet();
   }
 
   void openEditOddsDialog(BuildContext context, MatchPick match) {
@@ -1015,9 +996,6 @@ class AppController extends ChangeNotifier {
                           onPressed: () {
                             final text = _formatSlipShareText(_slipItems, totalOdds, comboStake, useSystem);
                             Clipboard.setData(ClipboardData(text: text));
-                            if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-                              const SnackBar(content: Text('Formázott szelvény vágólapra másolva!')),
-                            );
                           },
                           icon: const Icon(Icons.share, size: 16),
                           label: const Text('Másolás', style: TextStyle(fontSize: 12)),
@@ -1062,9 +1040,6 @@ class AppController extends ChangeNotifier {
     notifyListeners();
                             saveState();
                             Navigator.pop(context);
-                            if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-                              const SnackBar(content: Text('Szelvény rögzítve a Tippnaplóba!')),
-                            );
                           },
                           icon: const Icon(Icons.check_circle_outline),
                           label: const Text('Szelvény naplózása'),
@@ -1117,9 +1092,6 @@ class AppController extends ChangeNotifier {
     
     notifyListeners();
     saveState();
-    if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-      SnackBar(content: Text('Tipp rögzítve: $mLabel (${stake.round()} Ft)!')),
-    );
   }
 
   void addManualBet(BetRecord record) {
@@ -1131,9 +1103,6 @@ class AppController extends ChangeNotifier {
     
     notifyListeners();
     saveState();
-    if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-      SnackBar(content: Text('Kézi tipp rögzítve: ${record.matchTitle}')),
-    );
   }
 
   void adjustBankrollCapital(double delta) {
@@ -1142,9 +1111,6 @@ class AppController extends ChangeNotifier {
     
     notifyListeners();
     saveState();
-    if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-      SnackBar(content: Text('Új tőkeegyenleg: ${_bankroll.round()} Ft')),
-    );
   }
 
   void updateBetStatus(String betId, String newStatus) {
@@ -1323,9 +1289,6 @@ class AppController extends ChangeNotifier {
                         onPressed: () {
                           final jsonStr = _exportBackupJson();
                           Clipboard.setData(ClipboardData(text: jsonStr));
-                          if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-                            const SnackBar(content: Text('Teljes biztonsági mentés vágólapra másolva!')),
-                          );
                         },
                         icon: const Icon(Icons.copy, size: 15),
                         label: const Text('Mentés másolása vágólapra', style: TextStyle(fontSize: 11)),
@@ -1348,13 +1311,6 @@ class AppController extends ChangeNotifier {
                         onPressed: () async {
                           final ok = await _importBackupJson(backupController.text);
                           {
-                            if (context != null) ScaffoldMessenger.of(context!).showSnackBar(
-                              SnackBar(
-                                content: Text(ok
-                                    ? 'Adatok sikeresen visszaállítva!'
-                                    : 'Hibás JSON formátum!'),
-                              ),
-                            );
                             if (ok) Navigator.pop(context);
                           }
                         },
@@ -1794,6 +1750,7 @@ class AppController extends ChangeNotifier {
                                             onPressed: () {
                                               Navigator.pop(context);
                                               openLogBetDialog(
+                                                context,
                                                 match,
                                                 customLabel: 'SGP: ${sgp.leg1Label} + ${sgp.leg2Label}',
                                                 customOddsVal: sgpBookieOdds,
@@ -2062,7 +2019,7 @@ class AppController extends ChangeNotifier {
                                           GestureDetector(
                                             onTap: () {
                                               Navigator.pop(context);
-                                              openLogBetDialog(match, chosenMarket: opt);
+                                              openLogBetDialog(context, match, chosenMarket: opt);
                                             },
                                             child: Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
