@@ -23,7 +23,7 @@ jobs:
       - name: Flutter projekt inicializálása
         run: flutter create . --project-name goaledge_ai
 
-      - name: Android Push & Desugaring beállítása
+      - name: Android engedélyek és Desugaring beállítása
         run: |
           python3 - << 'EOF'
           import os, re
@@ -55,6 +55,10 @@ jobs:
               with open(manifest_path, "r") as f:
                   m = f.read()
               perms = ""
+              if "android.permission.INTERNET" not in m:
+                  perms += '    <uses-permission android:name="android.permission.INTERNET"/>\n'
+              if "android.permission.ACCESS_NETWORK_STATE" not in m:
+                  perms += '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n'
               if "POST_NOTIFICATIONS" not in m:
                   perms += '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n'
               if "VIBRATE" not in m:
