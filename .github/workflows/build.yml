@@ -25,11 +25,37 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Android keretrendszer generálása
+      - name: Android keretrendszer és egyedi ikon generálása
         run: |
           flutter create /tmp/template --platforms=android --project-name goaledge_ai
           cp -rn /tmp/template/android ./android
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="goaledge_ai"/android:label="GoalEdge AI"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.VIBRATE"\/>\n    <application/' android/app/src/main/AndroidManifest.xml
+          pip install pillow --quiet || true
+          python3 -c "
+          try:
+              from PIL import Image, ImageDraw
+              sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+              for density, sz in sizes.items():
+                  img = Image.new('RGBA', (sz, sz), (10, 14, 23, 255))
+                  draw = ImageDraw.Draw(img)
+                  pad = int(sz * 0.14)
+                  draw.rounded_rectangle([pad, pad, sz - pad, sz - pad], radius=int(sz * 0.22), fill=(19, 26, 41, 255), outline=(16, 185, 129, 255), width=max(2, sz // 24))
+                  pts = [
+                      (int(sz * 0.26), int(sz * 0.66)),
+                      (int(sz * 0.44), int(sz * 0.48)),
+                      (int(sz * 0.56), int(sz * 0.56)),
+                      (int(sz * 0.74), int(sz * 0.32)),
+                  ]
+                  draw.line(pts, fill=(16, 185, 129, 255), width=max(3, sz // 14))
+                  r = max(2, sz // 18)
+                  cx, cy = pts[-1]
+                  draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(59, 130, 246, 255))
+                  img.save(f'android/app/src/main/res/mipmap-{density}/ic_launcher.png')
+              print('Custom launcher icons generated.')
+          except Exception as e:
+              print('Icon generation skipped:', e)
+          "
 
       - name: Csomagok letöltése és APK fordítása
         run: |
