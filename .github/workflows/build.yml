@@ -20,12 +20,16 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Flutter projekt inicializálása
-        run: flutter create . --project-name goaledge_ai
+      - name: Flutter projekt inicializálása (android/ios scaffold)
+        run: |
+          # pubspec megőrzése – a flutter create felülírná
+          cp pubspec.yaml /tmp/pubspec.yaml.bak
+          flutter create . --project-name goaledge_ai --platforms=android
+          cp /tmp/pubspec.yaml.bak pubspec.yaml
 
       - name: Android engedélyek és Desugaring beállítása
         run: |
-          python3 - << 'EOF'
+          python3 - << 'PY'
           import os, re
 
           kts_path = "android/app/build.gradle.kts"
@@ -67,7 +71,7 @@ jobs:
                   m = m.replace("<application", perms + "    <application", 1)
                   with open(manifest_path, "w") as f:
                       f.write(m)
-          EOF
+          PY
 
       - name: Csomagok letöltése
         run: flutter pub get
@@ -78,5 +82,5 @@ jobs:
       - name: APK feltöltése
         uses: actions/upload-artifact@v4
         with:
-          name: GoalEdge-AI-v5
+          name: GoalEdge-AI-v7.1
           path: build/app/outputs/flutter-apk/app-release.apk
