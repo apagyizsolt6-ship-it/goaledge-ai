@@ -1,0 +1,42 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kód letöltése
+        uses: actions/checkout@v4
+
+      - name: Java 17 telepítése
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter telepítése
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Android keretrendszer generálása
+        run: |
+          flutter create /tmp/template --platforms=android --project-name goaledge_ai
+          cp -rn /tmp/template/android ./android
+
+      - name: Csomagok letöltése és APK fordítása
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: Kész APK feltöltése
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoalEdge-AI-Android
+          path: build/app/outputs/flutter-apk/app-release.apk
