@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+typedef JsonMap = Map<String, dynamic>;
+typedef StandingsMap = Map<int, TeamStandingInfo>;
+
 void main() {
   runApp(const GoalEdgeApp());
 }
@@ -141,7 +144,7 @@ class TeamStandingInfo {
   final int goalsFor;
   final int goalsAgainst;
   final int points;
-  final List> form;
+  final List<JsonMap> form;
 
   TeamStandingInfo({
     required this.teamId,
@@ -170,14 +173,14 @@ class MatchPick {
   final String league;
   final String leagueZone;
   final String kickoff;
-  final String status; // Scheduled, LIVE, FT, AET, PENS, Postponed
+  final String status;
   final String? minute;
   final int? homeScore;
   final int? awayScore;
   final String homeTeam;
   final String awayTeam;
   String market;
-  String marketCode; // 'home', 'over25', 'btts'
+  String marketCode;
   String trendSummary;
   String trendCategory;
   double modelProb;
@@ -236,9 +239,9 @@ class FixtureDetailData {
   final String? awayCoach;
   final int? htHome;
   final int? htAway;
-  final List> events;
-  final Map<String, dynamic>? homeStats;
-  final Map<String, dynamic>? awayStats;
+  final List<JsonMap> events;
+  final JsonMap? homeStats;
+  final JsonMap? awayStats;
 
   FixtureDetailData({
     this.stadium,
@@ -261,7 +264,7 @@ class BetRecord {
   final String marketCode;
   final double odds;
   final double stake;
-  final String status; // 'pending', 'won', 'lost'
+  final String status;
   final String date;
 
   BetRecord({
@@ -282,7 +285,7 @@ class BetRecord {
     return 0.0;
   }
 
-  Map<String, dynamic> toJson() => {
+  JsonMap toJson() => {
         'id': id,
         'fixtureId': fixtureId,
         'matchTitle': matchTitle,
@@ -294,7 +297,7 @@ class BetRecord {
         'date': date,
       };
 
-  factory BetRecord.fromJson(Map<String, dynamic> json) => BetRecord(
+  factory BetRecord.fromJson(JsonMap json) => BetRecord(
         id: json['id'] ?? '',
         fixtureId: (json['fixtureId'] as num?)?.toInt(),
         matchTitle: json['matchTitle'] ?? '',
@@ -331,7 +334,7 @@ class SportApiResponse {
 
 class SportApiService {
   static const String defaultBaseUrl = 'https://sportapi.ai/api';
-  static final Map<int, Map<int, TeamStandingInfo>> _standingsCache = {};
+  static final Map<int, StandingsMap> _standingsCache = {};
 
   static String _formatDate(DateTime dt) {
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
@@ -408,7 +411,6 @@ class SportApiService {
         );
       }
 
-      // Kiemelt ligák előresorolása (Premier League: 24, La Liga: 1, stb.)
       const topLeagueNames = {
         'Premier League',
         'Spanish La Liga',
@@ -422,9 +424,12 @@ class SportApiService {
         'OTP Bank Liga',
       };
 
-      final sortedRaw = List>.from(
-        dataList.whereType>(),
-      );
+      final List<JsonMap> sortedRaw = [];
+      for (final el in dataList) {
+        if (el is JsonMap) {
+          sortedRaw.add(el);
+        }
+      }
 
       sortedRaw.sort((a, b) {
         final aLeague = (a['league_name'] ?? '').toString();
@@ -452,14 +457,12 @@ class SportApiService {
         final homeScore = (item['home_score'] as num?)?.toInt();
         final awayScore = (item['away_score'] as num?)?.toInt();
 
-        // CET/CEST időpont formázása a dokumentáció alapján
         String timeStr = dayLabel;
         final dtStr = (item['datetime'] ?? '').toString();
         if (dtStr.length >= 16) {
           timeStr = '$dayLabel ${dtStr.substring(11, 16)}';
         }
 
-        // Kezdeti Poisson becslés (amelyet a tabella betöltése azonnal pontosít!)
         final rng = math.Random(fixtureId);
         double hXg = 1.25 + (rng.nextDouble() * 0.95);
         double aXg = 0.95 + (rng.nextDouble() * 0.85);
@@ -468,7 +471,6 @@ class SportApiService {
         bool hasStandings = false;
         List<bool> trendList = List.generate(6, (_) => rng.nextDouble() > 0.3);
 
-        // Ha már gyorsítótárban van a liga tabellája, azonnal valódi adatokból számolunk!
         if (leagueId != null && _standingsCache.containsKey(leagueId)) {
           final table = _standingsCache[leagueId]!;
           final hInfo = homeId != null ? table[homeId] : null;
@@ -515,7 +517,7 @@ class SportApiService {
         statusCode: 200,
         matches: parsed,
         rawPreview: preview,
-        message: '${parsed.length} meccs betöltve (${dateStr})!',
+        message: '${parsed.length} meccs betöltve ($dateStr)!',
         rateLimitRemaining: remaining,
       );
     } catch (e) {
@@ -648,7 +650,7 @@ class SportApiService {
     );
   }
 
-  static Future> fetchStandings({
+  static Future<StandingsMap> fetchStandings({
     required String baseUrl,
     required String apiKey,
     required int leagueId,
@@ -672,7 +674,7 @@ class SportApiService {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true));
         final List<dynamic> rows = (decoded is Map && decoded['data'] is List) ? decoded['data'] : [];
-        final Map<int, TeamStandingInfo> map = {};
+        final StandingsMap map = {};
 
         for (final row in rows) {
           if (row is! Map) continue;
@@ -680,9 +682,14 @@ class SportApiService {
           final teamId = (teamObj is Map ? (teamObj['id'] as num?)?.toInt() : null) ?? 0;
           if (teamId == 0) continue;
 
-          final formList = (row['form'] is List)
-              ? List>.from((row['form'] as List).whereType>())
-              : >[];
+          final List<JsonMap> formList = [];
+          if (row['form'] is List) {
+            for (final item in row['form']) {
+              if (item is JsonMap) {
+                formList.add(item);
+              }
+            }
+          }
 
           map[teamId] = TeamStandingInfo(
             teamId: teamId,
@@ -725,27 +732,32 @@ class SportApiService {
         http.get(Uri.parse('$cleanBase/fixtures/$fixtureId/stats'), headers: headers).timeout(const Duration(seconds: 10)),
       ]);
 
-      Map<String, dynamic>? fixtureObj;
+      JsonMap? fixtureObj;
       if (results[0].statusCode == 200) {
         final d0 = jsonDecode(utf8.decode(results[0].bodyBytes, allowMalformed: true));
-        if (d0 is Map && d0['fixture'] is Map<String, dynamic>) {
+        if (d0 is Map && d0['fixture'] is JsonMap) {
           fixtureObj = d0['fixture'];
         }
       }
 
-      Map<String, dynamic>? homeStats;
-      Map<String, dynamic>? awayStats;
+      JsonMap? homeStats;
+      JsonMap? awayStats;
       if (results[1].statusCode == 200) {
         final d1 = jsonDecode(utf8.decode(results[1].bodyBytes, allowMalformed: true));
         if (d1 is Map && d1['available'] == true && d1['data'] is Map) {
-          homeStats = d1['data']['home'] as Map<String, dynamic>?;
-          awayStats = d1['data']['away'] as Map<String, dynamic>?;
+          homeStats = d1['data']['home'] as JsonMap?;
+          awayStats = d1['data']['away'] as JsonMap?;
         }
       }
 
-      final eventsList = (fixtureObj?['events'] is List)
-          ? List>.from((fixtureObj!['events'] as List).whereType>())
-          : >[];
+      final List<JsonMap> eventsList = [];
+      if (fixtureObj?['events'] is List) {
+        for (final ev in fixtureObj!['events']) {
+          if (ev is JsonMap) {
+            eventsList.add(ev);
+          }
+        }
+      }
 
       return FixtureDetailData(
         stadium: fixtureObj?['home_stadium']?.toString(),
@@ -777,7 +789,7 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
-  int _dayOffset = 0; // -1: Tegnap, 0: Ma, 1: Holnap
+  int _dayOffset = 0;
   bool _isLoadingApi = false;
   bool _isLiveMode = false;
 
@@ -860,7 +872,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final savedKey = prefs.getString('sportapi_key') ?? '';
     String savedBase = prefs.getString('sportapi_base') ?? SportApiService.defaultBaseUrl;
 
-    // Automatikus migráció a hibás régi alapértelmezett URL-ről
     if (savedBase.contains('api.sportapi.ai')) {
       savedBase = SportApiService.defaultBaseUrl;
       await prefs.setString('sportapi_base', savedBase);
@@ -881,7 +892,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       }
       if (betsJson != null) {
         final List<dynamic> decoded = jsonDecode(betsJson);
-        _bets = decoded.map((e) => BetRecord.fromJson(e)).toList();
+        final List<BetRecord> loadedBets = [];
+        for (final e in decoded) {
+          if (e is JsonMap) {
+            loadedBets.add(BetRecord.fromJson(e));
+          }
+        }
+        _bets = loadedBets;
       }
     });
 
@@ -955,13 +972,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     return result;
   }
 
-  // Háttérben lekéri az érintett ligák tabelláját és valós gólátlagból újraszámolja az esélyeket
   Future<void> _enrichMatchesWithStandings() async {
     final leagueIds = _matches
         .map((m) => m.leagueId)
         .whereType<int>()
         .toSet()
-        .take(6); // Max 6 liga lekérése egy körben az API-keret kíméléséhez
+        .take(6);
 
     bool anyUpdated = false;
     for (final lid in leagueIds) {
@@ -1015,7 +1031,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     }
   }
 
-  // Automatikusan kiértékeli a függőben lévő tippeket, ha a meccs már FT státuszú
   void _autoSettlePendingBets(List<MatchPick> freshMatches) {
     bool changed = false;
     for (int i = 0; i < _bets.length; i++) {
@@ -1515,8 +1530,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
                       ),
                     ),
-
-                    // Élő meccsstatisztikák és események a SportAPI.ai /fixtures/{id} és /stats végpontokról
                     if (detailFuture != null)
                       FutureBuilder<FixtureDetailData?>(
                         future: detailFuture,
@@ -1589,7 +1602,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                           );
                         },
                       ),
-
                     const SizedBox(height: 18),
                     Row(
                       children: [
@@ -2139,7 +2151,7 @@ class CalculatorTab extends StatefulWidget {
 }
 
 class _CalculatorTabState extends State<CalculatorTab> {
-  int _mode = 0; // 0: EV & Kelly, 1: Poisson Szimulátor
+  int _mode = 0;
   double _prob = 0.65;
   double _odds = 1.80;
   double _simHomeXg = 1.85;
@@ -2359,7 +2371,7 @@ class TrackerAndWatchlistTab extends StatefulWidget {
 }
 
 class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
-  int _subTab = 0; // 0: Tippnapló & ROI, 1: Riasztások
+  int _subTab = 0;
 
   @override
   Widget build(BuildContext context) {
