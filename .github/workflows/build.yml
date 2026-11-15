@@ -29,6 +29,7 @@ jobs:
         run: |
           flutter create /tmp/template --platforms=android --project-name goaledge_ai
           cp -rn /tmp/template/android ./android
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application/' android/app/src/main/AndroidManifest.xml
 
       - name: Csomagok letöltése és APK fordítása
         run: |
