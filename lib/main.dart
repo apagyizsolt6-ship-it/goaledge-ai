@@ -2125,7 +2125,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final SlipItemList generated = [];
     if (conservative) {
       // Konzervatív Duplázó: legmagasabb valószínűségű 2 kötés
-      final pool = >[];
+      final JsonList pool = >[];
       for (final m in candidates) {
         for (final opt in m.poisson.allMarkets) {
           if (opt.probability >= 0.58 && opt.refOdds >= 1.28 && opt.refOdds <= 1.75) {
