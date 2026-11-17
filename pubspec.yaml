@@ -1,7 +1,7 @@
 name: goaledge_ai
 description: GoalEdge AI v7.1 - Quant & Strategy Lab (Dixon-Coles, SGP & SportAPI.ai) - Riverpod refactored
 publish_to: 'none'
-version: 7.1.0+8
+version: 7.1.1+11
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
