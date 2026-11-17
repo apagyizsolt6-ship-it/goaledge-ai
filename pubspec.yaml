@@ -1,7 +1,7 @@
 name: goaledge_ai
-description: GoalEdge AI v7.1 - Quant & Strategy Lab (Dixon-Coles, SGP & SportAPI.ai) - Riverpod refactored
+description: GoalEdge AI v7.1 - Quant & Strategy Lab (Dixon-Coles, SGP & SportAPI.ai)
 publish_to: 'none'
-version: 7.1.1+11
+version: 7.1.2+12
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -14,6 +14,9 @@ dependencies:
   shared_preferences: ^2.3.2
   flutter_local_notifications: ^18.0.1
   flutter_riverpod: ^2.6.1
+  package_info_plus: ^8.1.2
+  path_provider: ^2.1.5
+  open_filex: ^4.6.0
 
 dev_dependencies:
   flutter_test:
