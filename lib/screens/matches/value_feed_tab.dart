@@ -231,66 +231,128 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
           ),
           const SizedBox(height: 8),
           if (topVault.isNotEmpty && _searchQuery.isEmpty && _smartFilter == 'all' && _minEvThreshold == 0.0) ...[
-            const Text('Napi Top 3 AI Széf (16-piacos Dixon-Coles)',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 98,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: topVault.take(3).length,
-                itemBuilder: (context, idx) {
-                  final top = topVault[idx];
-                  return GestureDetector(
+            Row(
+              children: [
+                const Icon(Icons.auto_awesome, size: 16, color: Color(0xFF10B981)),
+                const SizedBox(width: 6),
+                const Text(
+                  'Napi 3 tipp',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                ),
+                const Spacer(),
+                Text(
+                  'Ma · Top edge',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...List.generate(topVault.take(3).length, (idx) {
+              final top = topVault[idx];
+              final edge = top.edgePercent;
+              final stake = top.recommendedStake(widget.bankroll, widget.stakeProfile);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Material(
+                  color: const Color(0xFF131A29),
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
                     onTap: () => widget.onSelectMatch(top),
+                    borderRadius: BorderRadius.circular(16),
                     child: Container(
-                      width: 225,
-                      margin: const EdgeInsets.only(right: 10),
-                      padding: const EdgeInsets.all(11),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color.fromRGBO(16, 185, 129, 0.35)),
                         gradient: const LinearGradient(
-                          colors: [Color(0xFF132A24), Color(0xFF131A29)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFF0F241F), Color(0xFF131A29)],
                         ),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color.fromRGBO(16, 185, 129, 0.45)),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      child: Row(
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '${top.homeTeam} – ${top.awayTeam}',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
+                          Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: const Color.fromRGBO(16, 185, 129, 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '${idx + 1}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF10B981),
+                                fontSize: 14,
                               ),
-                              Text(
-                                '+${top.edgePercent.toStringAsFixed(1)}%',
-                                style: const TextStyle(
-                                    color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 11),
-                              ),
-                            ],
+                            ),
                           ),
-                          Text(top.market,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, color: Color(0xFFD1D5DB))),
-                          Text(
-                            'Szorzó: ${top.marketOdds} • Tét: ${top.recommendedStake(widget.bankroll, widget.stakeProfile)} Ft',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${top.homeTeam} – ${top.awayTeam}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  top.market,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFFD1D5DB)),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${top.league} · @ ${top.marketOdds} · ${stake} Ft',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color.fromRGBO(16, 185, 129, 0.18),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(
+                                  '+${edge.toStringAsFixed(1)}%',
+                                  style: const TextStyle(
+                                    color: Color(0xFF10B981),
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const Text(
+                                  'EV',
+                                  style: TextStyle(fontSize: 10, color: Color(0xFF6EE7B7)),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
                     ),
-                  );
-                },
+                  ),
+                ),
+              );
+            }),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 6, top: 2),
+              child: Text(
+                'Összes meccs',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF)),
               ),
             ),
-            const SizedBox(height: 10),
           ],
           SizedBox(
             height: 36,
@@ -430,266 +492,296 @@ class MatchValueCard extends StatelessWidget {
     required this.onLogBet,
   });
 
+  Color _edgeColor(double edge) {
+    if (edge >= 8) return const Color(0xFF10B981);
+    if (edge >= 3) return const Color(0xFF34D399);
+    if (edge > 0) return const Color(0xFF6EE7B7);
+    return const Color(0xFF6B7280);
+  }
+
   @override
   Widget build(BuildContext context) {
     final edge = match.edgePercent;
     final recStake = match.recommendedStake(bankroll, stakeProfile);
     final dropPct = match.oddsDropPercent;
+    final edgeColor = _edgeColor(edge);
+    final hasScore = match.homeScore != null && match.awayScore != null;
 
     return Card(
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.all(15),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // —— 1. Meta row: liga · idő | LIVE | edge ——
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  GestureDetector(
+                    onTap: onToggleFavLeague,
+                    child: Icon(
+                      isFavLeague ? Icons.star : Icons.star_border,
+                      size: 15,
+                      color: isFavLeague ? const Color(0xFFF59E0B) : const Color(0xFF4B5563),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  if (match.isLive)
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'ÉLŐ ${match.minute ?? ""}',
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
+                      ),
+                    ),
+                  Expanded(
+                    child: Text(
+                      '${match.league} · ${match.kickoff}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: edgeColor.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      edge >= 0 ? '+${edge.toStringAsFixed(1)}%' : '${edge.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        color: edgeColor,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: onToggleWatch,
+                    child: Icon(
+                      match.isWatched ? Icons.bookmark : Icons.bookmark_border,
+                      size: 18,
+                      color: match.isWatched ? const Color(0xFFF59E0B) : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // —— 2. Teams + score (hero) ——
+              Row(
                 children: [
                   Expanded(
                     child: Row(
                       children: [
-                        GestureDetector(
-                          onTap: onToggleFavLeague,
-                          child: Icon(
-                            isFavLeague ? Icons.star : Icons.star_border,
-                            size: 16,
-                            color: isFavLeague ? const Color(0xFFF59E0B) : const Color(0xFF6B7280),
-                          ),
+                        TeamLogoBadge(
+                          teamId: match.homeId,
+                          teamName: match.homeTeam,
+                          baseUrl: baseUrl,
+                          apiKey: apiKey,
+                          size: 26,
                         ),
-                        const SizedBox(width: 4),
-                        if (match.isLive) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEF4444),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              'ÉLŐ ${match.minute ?? ""}\'',
-                              style: const TextStyle(
-                                  fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        if (match.isHighPressure) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color.fromRGBO(245, 158, 11, 0.2),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              '🔥 NYOMÁS',
-                              style: TextStyle(
-                                  fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        if (match.isSteamMove) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color.fromRGBO(59, 130, 246, 0.22),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              '📉 STEAM -${dropPct.toStringAsFixed(0)}%',
-                              style: const TextStyle(
-                                  fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF60A5FA)),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            '${match.league} • ${match.kickoff}',
+                            match.homeTeam,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color.fromRGBO(16, 185, 129, 0.16),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '+${edge.toStringAsFixed(1)}% EV',
-                          style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0A0E17),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: match.isLive
+                            ? const Color.fromRGBO(239, 68, 68, 0.5)
+                            : const Color(0xFF1F2937),
+                      ),
+                    ),
+                    child: Text(
+                      hasScore ? '${match.homeScore} – ${match.awayScore}' : 'vs',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: hasScore ? 15 : 12,
+                        color: hasScore ? Colors.white : const Color(0xFF6B7280),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            match.awayTeam,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      GestureDetector(
-                        onTap: onToggleWatch,
-                        child: Icon(
-                          match.isWatched ? Icons.bookmark : Icons.bookmark_border,
-                          size: 20,
-                          color: match.isWatched ? const Color(0xFFF59E0B) : const Color(0xFF9CA3AF),
+                        const SizedBox(width: 8),
+                        TeamLogoBadge(
+                          teamId: match.awayId,
+                          teamName: match.awayTeam,
+                          baseUrl: baseUrl,
+                          apiKey: apiKey,
+                          size: 26,
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  TeamLogoBadge(
-                    teamId: match.homeId,
-                    teamName: match.homeTeam,
-                    baseUrl: baseUrl,
-                    apiKey: apiKey,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          match.homePos != null ? '${match.homeTeam} (${match.homePos}.)' : match.homeTeam,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 2),
-                        WdlStrip(codes: match.homeFormCodes),
                       ],
                     ),
                   ),
-                  if (match.homeScore != null && match.awayScore != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0A0E17),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        '${match.homeScore} - ${match.awayScore}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: match.isLive ? const Color(0xFFEF4444) : Colors.white,
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          match.awayPos != null ? '(${match.awayPos}.) ${match.awayTeam}' : match.awayTeam,
-                          textAlign: TextAlign.end,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 2),
-                        WdlStrip(codes: match.awayFormCodes),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TeamLogoBadge(
-                    teamId: match.awayId,
-                    teamName: match.awayTeam,
-                    baseUrl: baseUrl,
-                    apiKey: apiKey,
-                    size: 22,
-                  ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                match.trendSummary,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
-              ),
+              if (match.isHighPressure || match.isSteamMove) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    if (match.isHighPressure)
+                      _miniTag('🔥 Nyomás', const Color(0xFFF59E0B)),
+                    if (match.isSteamMove)
+                      _miniTag('Steam −${dropPct.toStringAsFixed(0)}%', const Color(0xFF60A5FA)),
+                  ],
+                ),
+              ],
               const SizedBox(height: 12),
+              // —— 3. Market row (primary tip) ——
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0A0E17),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: const Color(0xFF1F2937)),
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(match.market,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          const Text(
+                            'PIAC',
+                            style: TextStyle(fontSize: 9, color: Color(0xFF6B7280), letterSpacing: 0.6),
+                          ),
                           const SizedBox(height: 2),
                           Text(
-                            'AI: ${(match.modelProb * 100).round()}% • Ajánlott tét: $recStake Ft',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                            match.market,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                           ),
                         ],
                       ),
                     ),
-                    Row(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        GestureDetector(
-                          onTap: onEditOdds,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: match.isCustomOdds
-                                  ? const Color(0xFFF59E0B)
-                                  : const Color(0xFF10B981),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                Text(
-                                  '@ ${match.marketOdds.toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                      color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                                const SizedBox(width: 3),
-                                const Icon(Icons.edit, size: 11, color: Colors.black),
-                              ],
-                            ),
+                        const Text(
+                          'ODDS',
+                          style: TextStyle(fontSize: 9, color: Color(0xFF6B7280), letterSpacing: 0.6),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          match.marketOdds.toStringAsFixed(2),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFE5E7EB),
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        IconButton(
-                          icon: Icon(
-                            isInSlip ? Icons.check_circle : Icons.playlist_add,
-                            color: isInSlip ? const Color(0xFF10B981) : const Color(0xFF3B82F6),
-                            size: 21,
-                          ),
-                          tooltip: 'Kombi szelvénybe',
-                          onPressed: onToggleSlip,
+                      ],
+                    ),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'TÉT',
+                          style: TextStyle(fontSize: 9, color: Color(0xFF6B7280), letterSpacing: 0.6),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.add_circle_outline, color: Color(0xFF10B981), size: 21),
-                          tooltip: 'Naplózás',
-                          onPressed: onLogBet,
+                        const SizedBox(height: 2),
+                        Text(
+                          '$recStake Ft',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF9CA3AF)),
                         ),
                       ],
                     ),
                   ],
                 ),
               ),
+              const SizedBox(height: 10),
+              // —— 4. Actions ——
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onToggleSlip,
+                      icon: Icon(isInSlip ? Icons.check : Icons.add, size: 16),
+                      label: Text(isInSlip ? 'Szelvényben' : 'Szelvény', style: const TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isInSlip ? const Color(0xFF10B981) : const Color(0xFFD1D5DB),
+                        side: BorderSide(color: isInSlip ? const Color(0xFF10B981) : const Color(0xFF374151)),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onLogBet,
+                      icon: const Icon(Icons.edit_note, size: 16),
+                      label: const Text('Napló', style: TextStyle(fontSize: 12)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onEditOdds,
+                    tooltip: 'Odds szerkesztése',
+                    icon: const Icon(Icons.tune, size: 18, color: Color(0xFF9CA3AF)),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  static Widget _miniTag(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color),
       ),
     );
   }
