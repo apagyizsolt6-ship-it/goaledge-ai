@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Patch android build files after flutter create."""
 import os
 import re
 
@@ -100,6 +101,7 @@ if os.path.exists(manifest):
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
     ):
         if p not in m:
             perms += f'    <uses-permission android:name="{p}"/>\n'
