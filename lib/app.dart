@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'core/theme.dart';
-import 'screens/main_navigation_screen.dart';
+import 'screens/splash_update_gate.dart';
 
 class GoalEdgeApp extends StatelessWidget {
   const GoalEdgeApp({super.key});
@@ -11,7 +11,7 @@ class GoalEdgeApp extends StatelessWidget {
       title: 'GoalEdge AI',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: const MainNavigationScreen(),
+      home: const SplashUpdateGate(),
     );
   }
 }
