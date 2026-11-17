@@ -15,58 +15,183 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true
 
-      - name: Flutter projekt inicializálása (android/ios scaffold)
+      - name: Flutter projekt inicializálása (android scaffold)
         run: |
-          # pubspec megőrzése – a flutter create felülírná
           cp pubspec.yaml /tmp/pubspec.yaml.bak
-          flutter create . --project-name goaledge_ai --platforms=android
+          flutter create . --project-name goaledge_ai --platforms=android --org com.goaledge
           cp /tmp/pubspec.yaml.bak pubspec.yaml
 
-      - name: Android engedélyek és Desugaring beállítása
+      - name: Stabil applicationId + versionCode (run number)
+        run: |
+          # versionCode = github run number → mindig nő, update megy törlés nélkül
+          # applicationId fix: com.goaledge.goaledge_ai
+          python3 - << 'PY'
+          import os, re
+          run = os.environ.get("GITHUB_RUN_NUMBER", "1")
+          for path in ("android/app/build.gradle.kts", "android/app/build.gradle"):
+              if not os.path.exists(path):
+                  continue
+              with open(path, "r") as f:
+                  s = f.read()
+              # force applicationId
+              s = re.sub(
+                  r'applicationId\s*=\s*"[^"]+"',
+                  'applicationId = "com.goaledge.goaledge_ai"',
+                  s,
+              )
+              s = re.sub(
+                  r'applicationId\s+"[^"]+"',
+                  'applicationId "com.goaledge.goaledge_ai"',
+                  s,
+              )
+              # force versionCode from run number
+              s = re.sub(r"versionCode\s*=\s*flutter\.versionCode", f"versionCode = {run}", s)
+              s = re.sub(r"versionCode\s+flutter\.versionCode", f"versionCode {run}", s)
+              s = re.sub(r"versionCode\s+\d+", f"versionCode {run}", s)
+              with open(path, "w") as f:
+                  f.write(s)
+              print(f"Updated {path} versionCode={run}")
+          PY
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+
+      - name: Keystore beállítása (ha van secret)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Nincs KEYSTORE_BASE64 secret – debug signing (telefonon egyszer törölni kell, ha korábban más key volt)."
+            echo "HAS_KEYSTORE=false" >> $GITHUB_ENV
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties << EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+          echo "HAS_KEYSTORE=true" >> $GITHUB_ENV
+          echo "Keystore OK"
+
+      - name: Android engedélyek, Desugaring, release signing
         run: |
           python3 - << 'PY'
           import os, re
 
           kts_path = "android/app/build.gradle.kts"
           groovy_path = "android/app/build.gradle"
+          has_keystore = os.environ.get("HAS_KEYSTORE") == "true"
+
+          def patch_kts(s: str) -> str:
+              if "isCoreLibraryDesugaringEnabled" not in s:
+                  s = re.sub(
+                      r"(sourceCompatibility\s*=\s*JavaVersion\.VERSION_\d+)",
+                      r"isCoreLibraryDesugaringEnabled = true\n        \1",
+                      s, count=1,
+                  )
+              if "desugar_jdk_libs" not in s:
+                  s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+              if has_keystore and "create(\"release\")" not in s and 'create("release")' not in s:
+                  signing = '''
+    val keystoreProperties = java.util.Properties()
+    val keystorePropertiesFile = rootProject.file("key.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+    }
+
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+'''
+                  if "buildTypes {" in s and "signingConfigs" not in s:
+                      s = s.replace("buildTypes {", signing + "\n    buildTypes {", 1)
+                      s = re.sub(
+                          r"(buildTypes\s*\{\s*release\s*\{)",
+                          r"\1\n            signingConfig = signingConfigs.getByName(\"release\")",
+                          s,
+                          count=1,
+                      )
+              return s
+
+          def patch_groovy(s: str) -> str:
+              if "coreLibraryDesugaringEnabled" not in s:
+                  s = re.sub(
+                      r"(sourceCompatibility\s+JavaVersion\.VERSION_\d+)",
+                      r"coreLibraryDesugaringEnabled true\n        \1",
+                      s, count=1,
+                  )
+              if "desugar_jdk_libs" not in s:
+                  s += '\ndependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n'
+              if has_keystore and "signingConfigs" not in s:
+                  signing = '''
+    def keystoreProperties = new Properties()
+    def keystorePropertiesFile = rootProject.file('key.properties')
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+    }
+'''
+                  s = s.replace("buildTypes {", signing + "\n    buildTypes {", 1)
+                  s = re.sub(
+                      r"(release\s*\{)",
+                      r"\1\n            signingConfig signingConfigs.release",
+                      s,
+                      count=1,
+                  )
+              return s
 
           if os.path.exists(kts_path):
               with open(kts_path, "r") as f:
                   s = f.read()
-              if "isCoreLibraryDesugaringEnabled" not in s:
-                  s = re.sub(r"(sourceCompatibility\s*=\s*JavaVersion\.VERSION_\d+)", r"isCoreLibraryDesugaringEnabled = true\n        \1", s, count=1)
-              if "desugar_jdk_libs" not in s:
-                  s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
               with open(kts_path, "w") as f:
-                  f.write(s)
+                  f.write(patch_kts(s))
           elif os.path.exists(groovy_path):
               with open(groovy_path, "r") as f:
                   s = f.read()
-              if "coreLibraryDesugaringEnabled" not in s:
-                  s = re.sub(r"(sourceCompatibility\s+JavaVersion\.VERSION_\d+)", r"coreLibraryDesugaringEnabled true\n        \1", s, count=1)
-              if "desugar_jdk_libs" not in s:
-                  s += '\ndependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"\n}\n'
               with open(groovy_path, "w") as f:
-                  f.write(s)
+                  f.write(patch_groovy(s))
 
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           if os.path.exists(manifest_path):
               with open(manifest_path, "r") as f:
                   m = f.read()
               perms = ""
-              if "android.permission.INTERNET" not in m:
-                  perms += '    <uses-permission android:name="android.permission.INTERNET"/>\n'
-              if "android.permission.ACCESS_NETWORK_STATE" not in m:
-                  perms += '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n'
-              if "POST_NOTIFICATIONS" not in m:
-                  perms += '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n'
-              if "VIBRATE" not in m:
-                  perms += '    <uses-permission android:name="android.permission.VIBRATE"/>\n'
+              for p in [
+                  "android.permission.INTERNET",
+                  "android.permission.ACCESS_NETWORK_STATE",
+                  "android.permission.POST_NOTIFICATIONS",
+                  "android.permission.VIBRATE",
+              ]:
+                  if p not in m:
+                      perms += f'    <uses-permission android:name="{p}"/>\n'
               if perms:
                   m = m.replace("<application", perms + "    <application", 1)
                   with open(manifest_path, "w") as f:
@@ -76,11 +201,11 @@ jobs:
       - name: Csomagok letöltése
         run: flutter pub get
 
-      - name: APK fordítása
+      - name: APK fordítása (release)
         run: flutter build apk --release
 
       - name: APK feltöltése
         uses: actions/upload-artifact@v4
         with:
-          name: GoalEdge-AI-v7.1
+          name: GoalEdge-AI-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-release.apk
