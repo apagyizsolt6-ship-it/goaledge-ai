@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/models.dart';
 import '../../services/poisson_engine.dart';
+import '../../services/monte_carlo_service.dart';
 import '../../widgets/charts.dart';
 import '../matches/match_detail_widgets.dart';
 
@@ -102,35 +103,68 @@ class _CalculatorTabState extends State<CalculatorTab> {
     final stake2 = _arbTotalStake * ((1.0 / _arbOdds2) / invSum);
     final guaranteedReturn = stake1 * _arbOdds1;
 
-    final CurveList mcCurves = [];
-    final mcWinProb = (((_mcEdgePct / 100.0) + 1.0) / _mcAvgOdds).clamp(0.15, 0.90);
-    final mcStakeFrac = widget.stakeProfile == 'fix_2'
+    final mcWinProb = (((_mcEdgePct / 100.0) + 1.0) / _mcAvgOdds).clamp(0.12, 0.92);
+    final mcStakeFrac = widget.stakeProfile == 'flat_2'
         ? 0.02
         : (((mcWinProb * _mcAvgOdds - 1.0) / (_mcAvgOdds - 1.0)) * mult).clamp(0.005, 0.05);
-    final rng = math.Random(_mcSimSeed);
-    int ruinCount = 0;
-    final DoubleList endBankrolls = [];
 
-    for (int sim = 0; sim < 30; sim++) {
-      double b = widget.bankroll;
-      final DoubleList path = [b];
-      bool ruined = false;
-      for (int bet = 0; bet < 100; bet++) {
-        final st = b * mcStakeFrac;
-        if (rng.nextDouble() < mcWinProb) {
-          b += st * (_mcAvgOdds - 1.0);
-        } else {
-          b -= st;
-        }
-        if (b < widget.bankroll * 0.25) ruined = true;
-        path.add(b);
+    final mcBankroll = MonteCarloService.simulateBankrollPaths(
+      startBankroll: widget.bankroll,
+      winProb: mcWinProb,
+      odds: _mcAvgOdds,
+      stakeFraction: mcStakeFrac,
+      runs: _mcRuns,
+      betsPerRun: _mcBets,
+      seed: _mcSimSeed,
+    );
+    final mcCurves = mcBankroll.samplePaths;
+
+    final mcPoisson = PoissonEngine.calculate(_simHomeXg, _simAwayXg);
+    String mcMarketLabel = _mcMarketCode;
+    double mcMarketOdds = _mcAvgOdds;
+    for (final m in mcPoisson.allMarkets) {
+      if (m.code == _mcMarketCode) {
+        mcMarketLabel = m.label;
+        mcMarketOdds = m.refOdds;
+        break;
       }
-      if (ruined) ruinCount++;
-      endBankrolls.add(b);
-      mcCurves.add(path);
     }
-    endBankrolls.sort();
-    final medianEnd = endBankrolls[endBankrolls.length ~/ 2];
+    final mcMarket = MonteCarloService.simulateMarket(
+      poisson: mcPoisson,
+      marketCode: _mcMarketCode,
+      marketLabel: mcMarketLabel,
+      odds: mcMarketOdds,
+      runs: _mcRuns,
+      seed: _mcSimSeed + 7,
+    );
+
+    double homeOdds = 1.9;
+    double overOdds = 1.9;
+    for (final m in mcPoisson.allMarkets) {
+      if (m.code == 'home') homeOdds = m.refOdds;
+      if (m.code == 'over25') overOdds = m.refOdds;
+    }
+    final mcSlip = MonteCarloService.simulateSlip(
+      legs: [
+        McSlipLeg(
+          matrix: mcPoisson.matrix,
+          baseHome: mcPoisson.baseHomeScore,
+          baseAway: mcPoisson.baseAwayScore,
+          marketCode: 'home',
+          odds: homeOdds,
+        ),
+        McSlipLeg(
+          matrix: mcPoisson.matrix,
+          baseHome: mcPoisson.baseHomeScore,
+          baseAway: mcPoisson.baseAwayScore,
+          marketCode: 'over25',
+          odds: overOdds,
+        ),
+      ],
+      runs: _mcRuns,
+      seed: _mcSimSeed + 99,
+    );
+
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -477,45 +511,194 @@ class _CalculatorTabState extends State<CalculatorTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Monte Carlo Tőke Szimulátor (100 tipp)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const Expanded(
+                        child: Text(
+                          'Monte Carlo Labor',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.casino, color: Color(0xFF10B981)),
-                        tooltip: 'Új szimuláció futtatása',
+                        tooltip: 'Új seed',
                         onPressed: () => setState(() => _mcSimSeed++),
                       ),
                     ],
                   ),
-                  Text('Átlagos szorzó: ${_mcAvgOdds.toStringAsFixed(2)} • Átlag EV: +${_mcEdgePct.toStringAsFixed(1)}%',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
-                  Slider(
-                    value: _mcEdgePct,
-                    min: 1.0,
-                    max: 12.0,
-                    divisions: 22,
-                    activeColor: const Color(0xFF10B981),
-                    onChanged: (v) => setState(() => _mcEdgePct = v),
+                  const Text(
+                    'Akár 50 000 futás · bankroll / piac / szelvény',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
                   ),
-                  SizedBox(
-                    height: 150,
-                    width: double.infinity,
-                    child: CustomPaint(
-                      painter: MonteCarloPainter(mcCurves, widget.bankroll),
-                    ),
+                  const SizedBox(height: 10),
+                  SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('Tőke', style: TextStyle(fontSize: 11))),
+                      ButtonSegment(value: 1, label: Text('Piac', style: TextStyle(fontSize: 11))),
+                      ButtonSegment(value: 2, label: Text('Szelvény', style: TextStyle(fontSize: 11))),
+                    ],
+                    selected: {_mcMode},
+                    onSelectionChanged: (s) => setState(() => _mcMode = s.first),
                   ),
                   const SizedBox(height: 12),
-                  StatCompareRow(
-                    label: 'Medián tőke 100 tipp után',
-                    homeVal: '${widget.bankroll.round()} Ft →',
-                    awayVal: '${medianEnd.round()} Ft',
+                  Text('Futások: $_mcRuns', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  Slider(
+                    value: _mcRuns.toDouble(),
+                    min: 5000,
+                    max: 50000,
+                    divisions: 9,
+                    activeColor: const Color(0xFF10B981),
+                    onChanged: (v) => setState(() => _mcRuns = (v / 5000).round() * 5000),
                   ),
-                  StatCompareRow(
-                    label: '75%+ tőkevesztés kockázata',
-                    homeVal: '30 szimulált pálya',
-                    awayVal: '${((ruinCount / 30.0) * 100).round()}%',
-                  ),
+                  if (_mcMode == 0) ...[
+                    Text(
+                      'Szorzó: ${_mcAvgOdds.toStringAsFixed(2)} · modell EV: +${_mcEdgePct.toStringAsFixed(1)}%',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                    ),
+                    Slider(
+                      value: _mcAvgOdds,
+                      min: 1.3,
+                      max: 4.0,
+                      divisions: 54,
+                      activeColor: const Color(0xFF3B82F6),
+                      onChanged: (v) => setState(() => _mcAvgOdds = double.parse(v.toStringAsFixed(2))),
+                    ),
+                    Slider(
+                      value: _mcEdgePct,
+                      min: 0.0,
+                      max: 12.0,
+                      divisions: 24,
+                      activeColor: const Color(0xFF10B981),
+                      onChanged: (v) => setState(() => _mcEdgePct = v),
+                    ),
+                    Text('Tipp / pálya: $_mcBets', style: const TextStyle(fontSize: 12)),
+                    Slider(
+                      value: _mcBets.toDouble(),
+                      min: 20,
+                      max: 200,
+                      divisions: 18,
+                      activeColor: const Color(0xFF10B981),
+                      onChanged: (v) => setState(() => _mcBets = v.round()),
+                    ),
+                    SizedBox(
+                      height: 150,
+                      width: double.infinity,
+                      child: CustomPaint(
+                        painter: MonteCarloPainter(mcCurves, widget.bankroll),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    StatCompareRow(
+                      label: 'Medián tőke',
+                      homeVal: '${widget.bankroll.round()} →',
+                      awayVal: '${mcBankroll.medianEnd.round()} Ft',
+                    ),
+                    StatCompareRow(
+                      label: '5–95% sáv',
+                      homeVal: '${mcBankroll.p5End.round()} Ft',
+                      awayVal: '${mcBankroll.p95End.round()} Ft',
+                    ),
+                    StatCompareRow(
+                      label: 'Átlag tőke',
+                      homeVal: '${mcBankroll.runs} pálya',
+                      awayVal: '${mcBankroll.meanEnd.round()} Ft',
+                    ),
+                    StatCompareRow(
+                      label: 'P(profit)',
+                      homeVal: 'vég > start',
+                      awayVal: '${(mcBankroll.profitRate * 100).toStringAsFixed(1)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'Ruin kockázat',
+                      homeVal: '< 25% tőke',
+                      awayVal: '${(mcBankroll.ruinRate * 100).toStringAsFixed(1)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'Tét arány',
+                      homeVal: widget.stakeProfile,
+                      awayVal: '${(mcStakeFrac * 100).toStringAsFixed(2)}%',
+                    ),
+                  ] else if (_mcMode == 1) ...[
+                    Text(
+                      'xG: ${_simHomeXg.toStringAsFixed(2)} – ${_simAwayXg.toStringAsFixed(2)} (állítsd a Dixon–Coles fülön is)',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final code in ['home', 'draw', 'away', 'over25', 'under25', 'btts', '1x', 'x2'])
+                          ChoiceChip(
+                            label: Text(code, style: const TextStyle(fontSize: 11)),
+                            selected: _mcMarketCode == code,
+                            selectedColor: const Color(0xFF10B981),
+                            onSelected: (_) => setState(() => _mcMarketCode = code),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    StatCompareRow(
+                      label: 'MC találati arány',
+                      homeVal: '${mcMarket.runs} futás',
+                      awayVal: '${(mcMarket.hitRate * 100).toStringAsFixed(2)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'Modell p',
+                      homeVal: mcMarket.marketLabel,
+                      awayVal: '${(mcMarket.modelProb * 100).toStringAsFixed(1)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'Fair odds (MC)',
+                      homeVal: '1 / hitRate',
+                      awayVal: mcMarket.fairOdds.toStringAsFixed(2),
+                    ),
+                    StatCompareRow(
+                      label: 'Ref odds',
+                      homeVal: 'piac / modell',
+                      awayVal: mcMarket.odds.toStringAsFixed(2),
+                    ),
+                    StatCompareRow(
+                      label: 'Edge',
+                      homeVal: 'MC vs odds',
+                      awayVal: '${mcMarket.edgePercent >= 0 ? '+' : ''}${mcMarket.edgePercent.toStringAsFixed(2)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'EV / 1 Ft tét',
+                      homeVal: 'várható nettó',
+                      awayVal: mcMarket.evPerUnitStake.toStringAsFixed(3),
+                    ),
+                  ] else ...[
+                    const Text(
+                      '2 lábas minta: Hazai + Over 2.5 (azonos meccs, korrelált)',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                    ),
+                    const SizedBox(height: 12),
+                    StatCompareRow(
+                      label: 'Kombinált odds',
+                      homeVal: '${mcSlip.legCount} láb',
+                      awayVal: mcSlip.combinedOdds.toStringAsFixed(2),
+                    ),
+                    StatCompareRow(
+                      label: 'MC hit rate',
+                      homeVal: '${mcSlip.runs} futás',
+                      awayVal: '${(mcSlip.hitRate * 100).toStringAsFixed(2)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'Fair odds',
+                      homeVal: '1 / p',
+                      awayVal: mcSlip.fairOdds.toStringAsFixed(2),
+                    ),
+                    StatCompareRow(
+                      label: 'Edge',
+                      homeVal: 'MC vs kombi',
+                      awayVal: '${mcSlip.edgePercent >= 0 ? '+' : ''}${mcSlip.edgePercent.toStringAsFixed(2)}%',
+                    ),
+                    StatCompareRow(
+                      label: 'EV / 1 Ft',
+                      homeVal: 'szelvény',
+                      awayVal: mcSlip.evPerUnitStake.toStringAsFixed(3),
+                    ),
+                  ],
                 ],
               ),
             ),
