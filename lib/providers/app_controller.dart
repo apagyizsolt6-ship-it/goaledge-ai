@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/poisson_engine.dart';
 import '../services/sport_api_service.dart';
 import '../services/notification_service.dart';
+import '../services/app_update_service.dart';
+import '../widgets/update_dialog.dart';
 import '../widgets/charts.dart';
 import '../screens/matches/match_detail_widgets.dart';
 
@@ -1186,6 +1189,53 @@ class AppController extends ChangeNotifier {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    FutureBuilder<PackageInfo>(
+                      future: PackageInfo.fromPlatform(),
+                      builder: (context, snap) {
+                        final v = snap.data;
+                        final label = v == null
+                            ? 'Verzió betöltése…'
+                            : 'v${v.version} (${v.buildNumber})';
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(bottom: 14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0A0E17),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF1F2937)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('ALKALMAZÁS', style: TextStyle(fontSize: 10, color: Color(0xFF6B7280), letterSpacing: 0.8)),
+                              const SizedBox(height: 4),
+                              Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final update = await AppUpdateService.checkForUpdate();
+                                    if (!context.mounted) return;
+                                    if (update == null) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Nincs újabb verzió.')),
+                                      );
+                                      return;
+                                    }
+                                    Navigator.pop(context);
+                                    await showAppUpdateDialog(context, update);
+                                  },
+                                  icon: const Icon(Icons.system_update, size: 16),
+                                  label: const Text('Frissítés keresése', style: TextStyle(fontSize: 12)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                     const Text(
                       'SportAPI.ai (X-Api-Key + ETag gyorsítótár)',
                       style: TextStyle(fontSize: 12, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
