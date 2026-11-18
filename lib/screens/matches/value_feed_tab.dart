@@ -385,12 +385,39 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
             ),
           ),
           const SizedBox(height: 12),
-          if (filtered.isEmpty)
+          if (widget.matches.isEmpty) ...[
+            const SizedBox(height: 8),
+            ...List.generate(4, (i) => const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: _MatchCardSkeleton(),
+                )),
             const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(
-                child: Text('Nincs a szűrőnek megfelelő mérkőzés.',
-                    style: TextStyle(color: Color(0xFF9CA3AF))),
+              padding: EdgeInsets.fromLTRB(8, 8, 8, 24),
+              child: Text(
+                'Meccsek betöltése… Húzd le a frissítéshez, vagy állítsd be az API kulcsot a Beállításokban.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+              ),
+            ),
+          ] else if (filtered.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                children: [
+                  Icon(Icons.filter_alt_off, size: 40, color: Color(0xFF374151)),
+                  SizedBox(height: 12),
+                  Text(
+                    'Nincs a szűrőnek megfelelő mérkőzés',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFD1D5DB)),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Állítsd „Mind”-re az EV küszöböt, vagy válassz másik napot / ligát.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                  ),
+                ],
               ),
             )
           else
