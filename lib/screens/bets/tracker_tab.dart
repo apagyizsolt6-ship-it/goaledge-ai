@@ -264,6 +264,9 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
     final avgClv = clvList.isNotEmpty
         ? (clvList.reduce((a, b) => a + b) / clvList.length)
         : null;
+    final clvPositiveRate = clvList.isNotEmpty
+        ? (clvList.where((c) => c > 0).length / clvList.length) * 100.0
+        : null;
 
     double brierSum = 0.0;
     int brierCount = 0;
@@ -393,22 +396,46 @@ class _TrackerAndWatchlistTabState extends State<TrackerAndWatchlistTab> {
                   ],
                 ),
                 const Divider(height: 20, color: Color(0xFF1F2937)),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Text(
-                      'Átlag CLV: ${avgClv != null ? "${avgClv >= 0 ? "+" : ""}${avgClv.toStringAsFixed(1)}%" : "Nincs adat"}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: (avgClv ?? 0) >= 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0A0E17),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF1F2937)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('CLV (Closing Line Value)',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Átlag: ${avgClv != null ? "${avgClv >= 0 ? "+" : ""}${avgClv.toStringAsFixed(1)}%" : "—"}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: (avgClv ?? 0) >= 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                            ),
+                          ),
+                          Text(
+                            clvList.isEmpty
+                                ? '0 mérés'
+                                : '${clvList.length} tipp · +CLV ${(clvPositiveRate ?? 0).toStringAsFixed(0)}%',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                          ),
+                        ],
                       ),
-                    ),
-                    Text(
-                      'Brier Kalibráció: ${brierScore != null ? brierScore.toStringAsFixed(3) : "Nincs adat"}',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      Text(
+                        'Brier: ${brierScore != null ? brierScore.toStringAsFixed(3) : "nincs adat"} · Záró odds a tipp kártyán adható meg',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                      ),
+                    ],
+                  ),
                 ),
                 if (curvePoints.length >= 2) ...[
                   const SizedBox(height: 14),
