@@ -46,13 +46,13 @@ class _CalculatorTabState extends State<CalculatorTab> {
   double _arbTotalStake = 20000;
 
   // Monte Carlo
-  int _mcMode = 0;
-  int _mcRuns = 10000;
-  int _mcBets = 100;
-  String _mcMarketCode = 'home';
-  int _mcSimSeed = 1;
+  int _mcSimSeed = 42;
   double _mcAvgOdds = 1.92;
   double _mcEdgePct = 5.0;
+  int _mcRuns = 50000;
+  int _mcBets = 100;
+  int _mcMode = 0; // 0 tőke, 1 piac, 2 szelvény
+  String _mcMarketCode = 'home';
 
   // Odds Konverter
   double _convDecimal = 2.10;
@@ -108,7 +108,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
     final guaranteedReturn = stake1 * _arbOdds1;
 
     final mcWinProb = (((_mcEdgePct / 100.0) + 1.0) / _mcAvgOdds).clamp(0.12, 0.92);
-    final mcStakeFrac = widget.stakeProfile == 'fix_2'
+    final mcStakeFrac = widget.stakeProfile == 'flat_2'
         ? 0.02
         : (((mcWinProb * _mcAvgOdds - 1.0) / (_mcAvgOdds - 1.0)) * mult).clamp(0.005, 0.05);
 
@@ -198,7 +198,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('T艖ke (Bankroll): ${widget.bankroll.round()} Ft',
+                      Text('Tőke (Bankroll): ${widget.bankroll.round()} Ft',
                           style: const TextStyle(fontWeight: FontWeight.bold)),
                       Row(
                         children: [
@@ -221,7 +221,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     onChanged: widget.onBankrollChanged,
                   ),
                   const SizedBox(height: 6),
-                  const Text('T茅tkezel茅si strat茅gia:',
+                  const Text('Tétkezelési stratégia:',
                       style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
                   const SizedBox(height: 6),
                   SizedBox(
@@ -237,7 +237,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     ),
                   ),
                   const Divider(height: 24, color: Color(0xFF1F2937)),
-                  Text('Bukm茅keri szorz贸: ${_odds.toStringAsFixed(2)}',
+                  Text('Bukmékeri szorzó: ${_odds.toStringAsFixed(2)}',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   Slider(
                     value: _odds,
@@ -247,7 +247,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     activeColor: const Color(0xFF3B82F6),
                     onChanged: (v) => setState(() => _odds = double.parse(v.toStringAsFixed(2))),
                   ),
-                  Text('Modell val贸sz铆n疟s茅g: ${_probPercent.round()}% (Fair: ${fairOdds.toStringAsFixed(2)})',
+                  Text('Modell valószínűség: ${_probPercent.round()}% (Fair: ${fairOdds.toStringAsFixed(2)})',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   Slider(
                     value: _probPercent,
@@ -270,7 +270,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                 children: [
                   Column(
                     children: [
-                      const Text('V谩rhat贸 脡rt茅k (EV)',
+                      const Text('Várható Érték (EV)',
                           style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
                       const SizedBox(height: 4),
                       Text(
@@ -285,7 +285,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   ),
                   Column(
                     children: [
-                      const Text('Aj谩nlott T茅t', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                      const Text('Ajánlott Tét', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
                       const SizedBox(height: 4),
                       Text(
                         '$recommendedStake Ft',
@@ -305,7 +305,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Hazai v谩rhat贸 g贸l (xG): ${_simHomeXg.toStringAsFixed(2)}',
+                  Text('Hazai várható gól (xG): ${_simHomeXg.toStringAsFixed(2)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
                   Slider(
                     value: _simHomeXg,
@@ -315,7 +315,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     activeColor: const Color(0xFF10B981),
                     onChanged: (v) => setState(() => _simHomeXg = v),
                   ),
-                  Text('Vend茅g v谩rhat贸 g贸l (xG): ${_simAwayXg.toStringAsFixed(2)}',
+                  Text('Vendég várható gól (xG): ${_simAwayXg.toStringAsFixed(2)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF3B82F6))),
                   Slider(
                     value: _simAwayXg,
@@ -336,7 +336,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Dixon-Coles 16-piacos eredm茅nyek',
+                  const Text('Dixon-Coles 16-piacos eredmények',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   const SizedBox(height: 12),
                   StatCompareRow(
@@ -351,17 +351,17 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     awayVal: '${(simPoisson.dnbHome * 100).round()}%',
                   ),
                   StatCompareRow(
-                    label: '2.5 g贸l felett / BTTS',
+                    label: '2.5 gól felett / BTTS',
                     homeVal: '${(simPoisson.over25 * 100).round()}%',
                     awayVal: '${(simPoisson.btts * 100).round()}%',
                   ),
                   StatCompareRow(
-                    label: '1. F茅lid艖 0.5+ / 1.5+',
+                    label: '1. Félidő 0.5+ / 1.5+',
                     homeVal: '${(simPoisson.htOver05 * 100).round()}%',
                     awayVal: '${(simPoisson.htOver15 * 100).round()}%',
                   ),
                   const SizedBox(height: 12),
-                  const Text('Top 3 legval贸sz铆n疟bb pontos eredm茅ny',
+                  const Text('Top 3 legvalószínűbb pontos eredmény',
                       style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
                   const SizedBox(height: 8),
                   Row(
@@ -400,11 +400,11 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Surebet / Dutcher Kalkul谩tor',
+                      const Text('Surebet / Dutcher Kalkulátor',
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       SegmentedButton<bool>(
                         segments: const [
-                          ButtonSegment(value: false, label: Text('2-ir谩ny煤', style: TextStyle(fontSize: 11))),
+                          ButtonSegment(value: false, label: Text('2-irányú', style: TextStyle(fontSize: 11))),
                           ButtonSegment(value: true, label: Text('1X2 (3)', style: TextStyle(fontSize: 11))),
                         ],
                         selected: {_isThreeWayArb},
@@ -413,7 +413,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Text('脰sszes megosztand贸 t茅t: ${_arbTotalStake.round()} Ft',
+                  Text('Összes megosztandó tét: ${_arbTotalStake.round()} Ft',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   Slider(
                     value: _arbTotalStake,
@@ -423,7 +423,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     activeColor: const Color(0xFF10B981),
                     onChanged: (v) => setState(() => _arbTotalStake = v),
                   ),
-                  Text('1. kimenet szorz贸: ${_arbOdds1.toStringAsFixed(2)}',
+                  Text('1. kimenet szorzó: ${_arbOdds1.toStringAsFixed(2)}',
                       style: const TextStyle(fontSize: 13)),
                   Slider(
                     value: _arbOdds1,
@@ -434,7 +434,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     onChanged: (v) => setState(() => _arbOdds1 = double.parse(v.toStringAsFixed(2))),
                   ),
                   if (_isThreeWayArb) ...[
-                    Text('D枚ntetlen (X) szorz贸: ${_arbOddsX.toStringAsFixed(2)}',
+                    Text('Döntetlen (X) szorzó: ${_arbOddsX.toStringAsFixed(2)}',
                         style: const TextStyle(fontSize: 13)),
                     Slider(
                       value: _arbOddsX,
@@ -445,7 +445,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                       onChanged: (v) => setState(() => _arbOddsX = double.parse(v.toStringAsFixed(2))),
                     ),
                   ],
-                  Text('2. kimenet szorz贸: ${_arbOdds2.toStringAsFixed(2)}',
+                  Text('2. kimenet szorzó: ${_arbOdds2.toStringAsFixed(2)}',
                       style: const TextStyle(fontSize: 13)),
                   Slider(
                     value: _arbOdds2,
@@ -470,7 +470,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        isSurebet ? 'BIZTOS PROFIT (SUREBET)' : 'Nincs arbitr谩zs (Dutcher)',
+                        isSurebet ? 'BIZTOS PROFIT (SUREBET)' : 'Nincs arbitrázs (Dutcher)',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: isSurebet ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
@@ -488,18 +488,18 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   ),
                   const Divider(height: 20, color: Color(0xFF1F2937)),
                   StatCompareRow(
-                    label: '1. kimenet t茅tje (@ $_arbOdds1)',
+                    label: '1. kimenet tétje (@ $_arbOdds1)',
                     homeVal: '${stake1.round()} Ft',
                     awayVal: 'Vissza: ${guaranteedReturn.round()} Ft',
                   ),
                   if (_isThreeWayArb)
                     StatCompareRow(
-                      label: 'D枚ntetlen (X) t茅tje (@ $_arbOddsX)',
+                      label: 'Döntetlen (X) tétje (@ $_arbOddsX)',
                       homeVal: '${stakeX.round()} Ft',
                       awayVal: 'Vissza: ${guaranteedReturn.round()} Ft',
                     ),
                   StatCompareRow(
-                    label: '2. kimenet t茅tje (@ $_arbOdds2)',
+                    label: '2. kimenet tétje (@ $_arbOdds2)',
                     homeVal: '${stake2.round()} Ft',
                     awayVal: 'Vissza: ${guaranteedReturn.round()} Ft',
                   ),
@@ -524,27 +524,27 @@ class _CalculatorTabState extends State<CalculatorTab> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.casino, color: Color(0xFF10B981)),
-                        tooltip: '脷j seed',
+                        tooltip: 'Új seed',
                         onPressed: () => setState(() => _mcSimSeed++),
                       ),
                     ],
                   ),
                   const Text(
-                    'Ak谩r 50 000 fut谩s 路 bankroll / piac / szelv茅ny',
+                    'Akár 50 000 futás · bankroll / piac / szelvény',
                     style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
                   ),
                   const SizedBox(height: 10),
                   SegmentedButton<int>(
                     segments: const [
-                      ButtonSegment(value: 0, label: Text('T艖ke', style: TextStyle(fontSize: 11))),
+                      ButtonSegment(value: 0, label: Text('Tőke', style: TextStyle(fontSize: 11))),
                       ButtonSegment(value: 1, label: Text('Piac', style: TextStyle(fontSize: 11))),
-                      ButtonSegment(value: 2, label: Text('Szelv茅ny', style: TextStyle(fontSize: 11))),
+                      ButtonSegment(value: 2, label: Text('Szelvény', style: TextStyle(fontSize: 11))),
                     ],
                     selected: {_mcMode},
                     onSelectionChanged: (s) => setState(() => _mcMode = s.first),
                   ),
                   const SizedBox(height: 12),
-                  Text('Fut谩sok: $_mcRuns', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text('Futások: $_mcRuns', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   Slider(
                     value: _mcRuns.toDouble(),
                     min: 5000,
@@ -555,7 +555,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   ),
                   if (_mcMode == 0) ...[
                     Text(
-                      'Szorz贸: ${_mcAvgOdds.toStringAsFixed(2)} 路 modell EV: +${_mcEdgePct.toStringAsFixed(1)}%',
+                      'Szorzó: ${_mcAvgOdds.toStringAsFixed(2)} · modell EV: +${_mcEdgePct.toStringAsFixed(1)}%',
                       style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                     ),
                     Slider(
@@ -574,7 +574,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                       activeColor: const Color(0xFF10B981),
                       onChanged: (v) => setState(() => _mcEdgePct = v),
                     ),
-                    Text('Tipp / p谩lya: $_mcBets', style: const TextStyle(fontSize: 12)),
+                    Text('Tipp / pálya: $_mcBets', style: const TextStyle(fontSize: 12)),
                     Slider(
                       value: _mcBets.toDouble(),
                       min: 20,
@@ -592,38 +592,38 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     ),
                     const SizedBox(height: 10),
                     StatCompareRow(
-                      label: 'Medi谩n t艖ke',
-                      homeVal: '${widget.bankroll.round()} 鈫�',
+                      label: 'Medián tőke',
+                      homeVal: '${widget.bankroll.round()} →',
                       awayVal: '${mcBankroll.medianEnd.round()} Ft',
                     ),
                     StatCompareRow(
-                      label: '5鈥�95% s谩v',
+                      label: '5–95% sáv',
                       homeVal: '${mcBankroll.p5End.round()} Ft',
                       awayVal: '${mcBankroll.p95End.round()} Ft',
                     ),
                     StatCompareRow(
-                      label: '脕tlag t艖ke',
-                      homeVal: '${mcBankroll.runs} p谩lya',
+                      label: 'Átlag tőke',
+                      homeVal: '${mcBankroll.runs} pálya',
                       awayVal: '${mcBankroll.meanEnd.round()} Ft',
                     ),
                     StatCompareRow(
                       label: 'P(profit)',
-                      homeVal: 'v茅g > start',
+                      homeVal: 'vég > start',
                       awayVal: '${(mcBankroll.profitRate * 100).toStringAsFixed(1)}%',
                     ),
                     StatCompareRow(
-                      label: 'Ruin kock谩zat',
-                      homeVal: '< 25% t艖ke',
+                      label: 'Ruin kockázat',
+                      homeVal: '< 25% tőke',
                       awayVal: '${(mcBankroll.ruinRate * 100).toStringAsFixed(1)}%',
                     ),
                     StatCompareRow(
-                      label: 'T茅t ar谩ny',
+                      label: 'Tét arány',
                       homeVal: widget.stakeProfile,
                       awayVal: '${(mcStakeFrac * 100).toStringAsFixed(2)}%',
                     ),
                   ] else if (_mcMode == 1) ...[
                     Text(
-                      'xG: ${_simHomeXg.toStringAsFixed(2)} 鈥� ${_simAwayXg.toStringAsFixed(2)} (谩ll铆tsd a Dixon鈥揅oles f眉l枚n is)',
+                      'xG: ${_simHomeXg.toStringAsFixed(2)} – ${_simAwayXg.toStringAsFixed(2)} (állítsd a Dixon–Coles fülön is)',
                       style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                     ),
                     const SizedBox(height: 8),
@@ -642,8 +642,8 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     ),
                     const SizedBox(height: 12),
                     StatCompareRow(
-                      label: 'MC tal谩lati ar谩ny',
-                      homeVal: '${mcMarket.runs} fut谩s',
+                      label: 'MC találati arány',
+                      homeVal: '${mcMarket.runs} futás',
                       awayVal: '${(mcMarket.hitRate * 100).toStringAsFixed(2)}%',
                     ),
                     StatCompareRow(
@@ -667,24 +667,24 @@ class _CalculatorTabState extends State<CalculatorTab> {
                       awayVal: '${mcMarket.edgePercent >= 0 ? '+' : ''}${mcMarket.edgePercent.toStringAsFixed(2)}%',
                     ),
                     StatCompareRow(
-                      label: 'EV / 1 Ft t茅t',
-                      homeVal: 'v谩rhat贸 nett贸',
+                      label: 'EV / 1 Ft tét',
+                      homeVal: 'várható nettó',
                       awayVal: mcMarket.evPerUnitStake.toStringAsFixed(3),
                     ),
                   ] else ...[
                     const Text(
-                      '2 l谩bas minta: Hazai + Over 2.5 (azonos meccs, korrel谩lt)',
+                      '2 lábas minta: Hazai + Over 2.5 (azonos meccs, korrelált)',
                       style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                     ),
                     const SizedBox(height: 12),
                     StatCompareRow(
-                      label: 'Kombin谩lt odds',
-                      homeVal: '${mcSlip.legCount} l谩b',
+                      label: 'Kombinált odds',
+                      homeVal: '${mcSlip.legCount} láb',
                       awayVal: mcSlip.combinedOdds.toStringAsFixed(2),
                     ),
                     StatCompareRow(
                       label: 'MC hit rate',
-                      homeVal: '${mcSlip.runs} fut谩s',
+                      homeVal: '${mcSlip.runs} futás',
                       awayVal: '${(mcSlip.hitRate * 100).toStringAsFixed(2)}%',
                     ),
                     StatCompareRow(
@@ -699,7 +699,7 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     ),
                     StatCompareRow(
                       label: 'EV / 1 Ft',
-                      homeVal: 'szelv茅ny',
+                      homeVal: 'szelvény',
                       awayVal: mcSlip.evPerUnitStake.toStringAsFixed(3),
                     ),
                   ],
@@ -708,17 +708,17 @@ class _CalculatorTabState extends State<CalculatorTab> {
             ),
           ),
         ] else ...[
-          // 5. M脫D: ODDS KONVERTER (DECIM脕LIS <-> T脰RT UK <-> AMERIKAI US)
+          // 5. MÓD: ODDS KONVERTER (DECIMÁLIS <-> TÖRT UK <-> AMERIKAI US)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Odds Konverter & Implik谩lt Val贸sz铆n疟s茅g',
+                  const Text('Odds Konverter & Implikált Valószínűség',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   const SizedBox(height: 12),
-                  Text('Decim谩lis (EU) szorz贸: ${_convDecimal.toStringAsFixed(2)}',
+                  Text('Decimális (EU) szorzó: ${_convDecimal.toStringAsFixed(2)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
                   Slider(
                     value: _convDecimal,
@@ -730,13 +730,13 @@ class _CalculatorTabState extends State<CalculatorTab> {
                   ),
                   const Divider(height: 20, color: Color(0xFF1F2937)),
                   StatCompareRow(
-                    label: 'Decim谩lis (EU)',
-                    homeVal: 'Eur贸pai form谩tum',
+                    label: 'Decimális (EU)',
+                    homeVal: 'Európai formátum',
                     awayVal: _convDecimal.toStringAsFixed(2),
                   ),
                   StatCompareRow(
-                    label: 'T枚rt (UK / Brit)',
-                    homeVal: 'Nett贸 nyerem茅ny ar谩ny',
+                    label: 'Tört (UK / Brit)',
+                    homeVal: 'Nettó nyeremény arány',
                     awayVal: _toFractionalOdds(_convDecimal),
                   ),
                   StatCompareRow(
@@ -745,8 +745,8 @@ class _CalculatorTabState extends State<CalculatorTab> {
                     awayVal: _toAmericanOdds(_convDecimal),
                   ),
                   StatCompareRow(
-                    label: 'Implik谩lt val贸sz铆n疟s茅g',
-                    homeVal: 'Break-even tal谩lati %',
+                    label: 'Implikált valószínűség',
+                    homeVal: 'Break-even találati %',
                     awayVal: '${((1.0 / _convDecimal) * 100).toStringAsFixed(1)}%',
                   ),
                 ],
@@ -758,3 +758,4 @@ class _CalculatorTabState extends State<CalculatorTab> {
     );
   }
 }
+
