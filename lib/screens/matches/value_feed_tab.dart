@@ -389,7 +389,7 @@ class _ValueFeedTabState extends State<ValueFeedTab> {
             const SizedBox(height: 8),
             ...List.generate(4, (i) => const Padding(
                   padding: EdgeInsets.only(bottom: 12),
-                  child: _MatchCardSkeleton(),
+                  child: const _MatchCardSkeleton(),
                 )),
             const Padding(
               padding: EdgeInsets.fromLTRB(8, 8, 8, 24),
@@ -482,6 +482,59 @@ class _SmartChip extends StatelessWidget {
             color: selected ? Colors.black : const Color(0xFFD1D5DB),
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+class _MatchCardSkeleton extends StatelessWidget {
+  const _MatchCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget bar({double? width, required double height}) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1F2937),
+            borderRadius: BorderRadius.circular(6),
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131A29),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              bar(width: 90, height: 10),
+              const Spacer(),
+              bar(width: 48, height: 18),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              bar(width: 28, height: 28),
+              const SizedBox(width: 8),
+              Expanded(child: bar(height: 14)),
+              const SizedBox(width: 8),
+              bar(width: 40, height: 20),
+              const SizedBox(width: 8),
+              Expanded(child: bar(height: 14)),
+              const SizedBox(width: 8),
+              bar(width: 28, height: 28),
+            ],
+          ),
+          const SizedBox(height: 14),
+          bar(height: 44),
+        ],
       ),
     );
   }
