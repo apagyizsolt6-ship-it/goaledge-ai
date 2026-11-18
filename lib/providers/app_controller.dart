@@ -11,6 +11,7 @@ import '../services/sport_api_service.dart';
 import '../services/notification_service.dart';
 import '../services/app_update_service.dart';
 import '../widgets/update_dialog.dart';
+import '../widgets/monte_carlo_sheet.dart';
 import '../widgets/charts.dart';
 import '../screens/matches/match_detail_widgets.dart';
 
@@ -1055,6 +1056,20 @@ class AppController extends ChangeNotifier {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        showSlipMonteCarloSheet(
+                          context,
+                          legs: List.from(_slipItems),
+                        );
+                      },
+                      icon: const Icon(Icons.casino, size: 16, color: Color(0xFF10B981)),
+                      label: const Text('Szelvény Monte Carlo (50k)', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
                 ],
               ),
             );
@@ -1670,6 +1685,23 @@ class AppController extends ChangeNotifier {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          showMatchMonteCarloSheet(
+                            context,
+                            match: match,
+                            bankroll: _bankroll,
+                            stakeProfile: _stakeProfile,
+                          );
+                        },
+                        icon: const Icon(Icons.casino, size: 16, color: Color(0xFF10B981)),
+                        label: const Text('Monte Carlo 50k szimuláció', style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     const TabBar(
                       isScrollable: true,
                       indicatorColor: Color(0xFF10B981),
