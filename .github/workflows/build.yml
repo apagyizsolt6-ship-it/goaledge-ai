@@ -1,4 +1,4 @@
-name: Build GoalEdge AI APK
+name: Build APK
 
 on:
   push:
@@ -22,6 +22,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pin if CI suddenly breaks on latest stable; remove comment to lock:
+          # flutter-version: "3.27.4"
           cache: true
 
       - name: Flutter android scaffold
@@ -56,6 +58,13 @@ jobs:
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: python3 tool/patch_android.py
+
+      - name: Show android settings (debug)
+        run: |
+          echo "===== settings.gradle.kts ====="
+          head -40 android/settings.gradle.kts 2>/dev/null || head -40 android/settings.gradle
+          echo "===== app build.gradle ====="
+          head -80 android/app/build.gradle.kts 2>/dev/null || head -80 android/app/build.gradle
 
       - name: Flutter pub get
         run: flutter pub get
