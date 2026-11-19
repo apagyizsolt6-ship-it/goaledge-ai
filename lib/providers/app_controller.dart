@@ -15,6 +15,7 @@ import '../widgets/monte_carlo_sheet.dart';
 import '../widgets/charts.dart';
 import '../screens/matches/match_detail_widgets.dart';
 import '../screens/matches/match_detail_sheet.dart';
+import '../widgets/combo_slip_sheet.dart';
 
 /// Central app state (refactored from monolithic MainNavigationScreen).
 class AppController extends ChangeNotifier {
@@ -794,288 +795,24 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  String _formatSlipShareText(SlipItemList items, double totalOdds, double stake, bool isSystem) {
-    final buf = StringBuffer();
-    final modeTitle = isSystem
-        ? (items.length == 3 ? 'System 2/3' : 'System 3/4')
-        : 'Kombi (${items.length} kötés)';
-    buf.writeln('📊 GoalEdge AI Szelvény – $modeTitle');
-    buf.writeln('────────────────────');
-    for (int i = 0; i < items.length; i++) {
-      final it = items[i];
-      buf.writeln('${i + 1}. ${it.matchTitle} (${it.league})');
-      buf.writeln('   ▶ ${it.marketLabel} @ ${it.odds.toStringAsFixed(2)}');
-    }
-    buf.writeln('────────────────────');
-    if (!isSystem) {
-      buf.writeln('🔥 Eredő szorzó: ${totalOdds.toStringAsFixed(2)}x');
-      buf.writeln('💰 Tét: ${stake.round()} Ft → Várható: ${(stake * totalOdds).round()} Ft');
-    } else {
-      buf.writeln('💰 Össztét: ${stake.round()} Ft ($modeTitle)');
-    }
-    return buf.toString();
-  }
-
   void openComboSlipSheet(BuildContext context) {
     if (_slipItems.isEmpty) return;
-    double comboStake = (_bankroll * 0.02).clamp(500, 30000).roundToDouble();
-    bool useSystem = false;
-
-    showModalBottomSheet(
+    ComboSlipSheet.show(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF131A29),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            if (_slipItems.isEmpty) {
-              Navigator.pop(context);
-              return const SizedBox.shrink();
-            }
-
-            final canSystem = _slipItems.length == 3 || _slipItems.length == 4;
-            if (!canSystem) useSystem = false;
-
-            double totalOdds = 1.0;
-            double combinedProb = 1.0;
-            for (final it in _slipItems) {
-              totalOdds *= it.odds;
-              combinedProb *= it.modelProb;
-            }
-            final comboEv = (combinedProb * totalOdds) - 1.0;
-
-            double sysMinWin = 0.0;
-            double sysMaxWin = 0.0;
-            final int sysCombos = _slipItems.length;
-            if (canSystem && useSystem) {
-              final lineStake = comboStake / sysCombos;
-              final DoubleList subOdds = [];
-              for (int skip = 0; skip < _slipItems.length; skip++) {
-                double prod = 1.0;
-                for (int j = 0; j < _slipItems.length; j++) {
-                  if (j != skip) prod *= _slipItems[j].odds;
-                }
-                subOdds.add(prod);
-              }
-              subOdds.sort();
-              sysMinWin = lineStake * subOdds.first;
-              sysMaxWin = subOdds.fold<double>(0.0, (s, o) => s + (lineStake * o));
-            }
-
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Kombi Szelvény (${_slipItems.length} kötés)',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      TextButton(
-                        onPressed: () {
-                          _slipItems.clear();
-    notifyListeners();
-                          Navigator.pop(context);
-                        },
-                        child: const Text('Ürítés', style: TextStyle(color: Color(0xFFEF4444))),
-                      ),
-                    ],
-                  ),
-                  if (canSystem) ...[
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      width: double.infinity,
-                      child: SegmentedButton<bool>(
-                        segments: [
-                          const ButtonSegment(value: false, label: Text('Normál Kombi', style: TextStyle(fontSize: 11))),
-                          ButtonSegment(
-                            value: true,
-                            label: Text(_slipItems.length == 3 ? 'System 2/3' : 'System 3/4',
-                                style: const TextStyle(fontSize: 11)),
-                          ),
-                        ],
-                        selected: {useSystem},
-                        onSelectionChanged: (s) => setModalState(() => useSystem = s.first),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  ..._slipItems.map((it) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0A0E17),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF1F2937)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(it.matchTitle,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                Text('${it.marketLabel} (${(it.modelProb * 100).round()}%)',
-                                    style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-                              ],
-                            ),
-                          ),
-                          Text('@ ${it.odds.toStringAsFixed(2)}',
-                              style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
-                          IconButton(
-                            icon: const Icon(Icons.close, size: 18, color: Colors.grey),
-                            onPressed: () {
-                              _slipItems.removeWhere((e) => e.key == it.key);
-    notifyListeners();
-                              setModalState(() {});
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0A0E17),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: useSystem
-                        ? Column(
-                            children: [
-                              StatCompareRow(
-                                label: 'Alaptét / oszlop ($sysCombos db)',
-                                homeVal: '${(comboStake / sysCombos).round()} Ft',
-                                awayVal: 'Összesen: ${comboStake.round()} Ft',
-                              ),
-                              StatCompareRow(
-                                label: 'Min / Max nyeremény',
-                                homeVal: 'Min: ${sysMinWin.round()} Ft',
-                                awayVal: 'Max: ${sysMaxWin.round()} Ft',
-                              ),
-                            ],
-                          )
-                        : Column(
-                            children: [
-                              StatCompareRow(
-                                label: 'Eredő szorzó',
-                                homeVal: '${(combinedProb * 100).toStringAsFixed(1)}% esély',
-                                awayVal: '${totalOdds.toStringAsFixed(2)}x',
-                              ),
-                              StatCompareRow(
-                                label: 'Kombinált EV',
-                                homeVal: 'Várható érték',
-                                awayVal: '${comboEv >= 0 ? '+' : ''}${(comboEv * 100).toStringAsFixed(1)}%',
-                              ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    useSystem
-                        ? 'Össztét: ${comboStake.round()} Ft → Max: ${sysMaxWin.round()} Ft'
-                        : 'Tét: ${comboStake.round()} Ft → Várható: ${(comboStake * totalOdds).round()} Ft',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  Slider(
-                    value: comboStake,
-                    min: 500,
-                    max: 50000,
-                    divisions: 99,
-                    activeColor: const Color(0xFF10B981),
-                    onChanged: (v) => setModalState(() => comboStake = v),
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            final text = _formatSlipShareText(_slipItems, totalOdds, comboStake, useSystem);
-                            Clipboard.setData(ClipboardData(text: text));
-                          },
-                          icon: const Icon(Icons.share, size: 16),
-                          label: const Text('Másolás', style: TextStyle(fontSize: 12)),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            final now = DateTime.now();
-                            final dateLabel =
-                                '${now.month.toString().padLeft(2, '0')}.${now.day.toString().padLeft(2, '0')}.';
-                            final prefix = useSystem
-                                ? (_slipItems.length == 3 ? 'System 2/3' : 'System 3/4')
-                                : 'Kombi (${_slipItems.length})';
-                            final title =
-                                '$prefix: ${_slipItems.map((e) => e.matchTitle.split(' – ').first).join(', ')}';
-                            final effectiveOdds = useSystem ? (sysMaxWin / comboStake) : totalOdds;
-                            
-                              _bets.insert(
-                                0,
-                                BetRecord(
-                                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                                  league: useSystem ? 'System' : 'Kombi',
-                                  matchTitle: title,
-                                  market: _slipItems.map((e) => e.marketLabel).join(' + '),
-                                  marketCode: useSystem ? 'system' : 'combo',
-                                  marketCategory: useSystem ? 'System' : 'Kombi',
-                                  odds: double.parse(effectiveOdds.toStringAsFixed(2)),
-                                  modelProb: double.parse(combinedProb.toStringAsFixed(3)),
-                                  stake: comboStake,
-                                  status: 'pending',
-                                  date: dateLabel,
-                                ),
-                              );
-                              _slipItems.clear();
-                            
-    notifyListeners();
-                            saveState();
-                            Navigator.pop(context);
-                          },
-                          icon: const Icon(Icons.check_circle_outline),
-                          label: const Text('Szelvény naplózása'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        showSlipMonteCarloSheet(
-                          context,
-                          legs: List.from(_slipItems),
-                        );
-                      },
-                      icon: const Icon(Icons.casino, size: 16, color: Color(0xFF10B981)),
-                      label: const Text('Szelvény Monte Carlo (50k)', style: TextStyle(fontSize: 12)),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
+      slipItems: _slipItems,
+      bankroll: _bankroll,
+      onSlipChanged: (updated) {
+        _slipItems
+          ..clear()
+          ..addAll(updated);
+        notifyListeners();
+        saveState();
+      },
+      onLogComboBet: (bet) {
+        _bets.insert(0, bet);
+        _slipItems.clear();
+        notifyListeners();
+        saveState();
       },
     );
   }
