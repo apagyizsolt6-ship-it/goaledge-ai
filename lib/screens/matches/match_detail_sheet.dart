@@ -497,7 +497,7 @@ class _MatchDetailContentState extends State<_MatchDetailContent> {
                     decoration: BoxDecoration(
                       color: sgpEv >= 3
                           ? const Color.fromRGBO(16, 185, 129, 0.15)
- inter : const Color.fromRGBO(239, 68, 68, 0.12),
+                          : const Color.fromRGBO(239, 68, 68, 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
