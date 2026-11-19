@@ -16,6 +16,7 @@ import '../widgets/charts.dart';
 import '../screens/matches/match_detail_widgets.dart';
 import '../screens/matches/match_detail_sheet.dart';
 import '../widgets/combo_slip_sheet.dart';
+import '../widgets/settings_dialog.dart';
 
 /// Central app state (refactored from monolithic MainNavigationScreen).
 class AppController extends ChangeNotifier {
@@ -917,246 +918,30 @@ class AppController extends ChangeNotifier {
   }
 
   void openSettingsDialog(BuildContext context) {
-    final keyController = TextEditingController(text: _apiKey);
-    final baseController = TextEditingController(text: _baseUrl);
-    final backupController = TextEditingController();
-    String testOutput = _lastApiStatus;
-    bool testing = false;
-
-    showDialog(
+    SettingsDialog.show(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF131A29),
-              title: const Row(
-                children: [
-                  Icon(Icons.api, color: Color(0xFF10B981)),
-                  SizedBox(width: 8),
-                  Text('Beállítások & Mentés', style: TextStyle(fontSize: 18)),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FutureBuilder<PackageInfo>(
-                      future: PackageInfo.fromPlatform(),
-                      builder: (context, snap) {
-                        final v = snap.data;
-                        final label = v == null
-                            ? 'Verzió betöltése…'
-                            : 'v${v.version} (${v.buildNumber})';
-                        return Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          margin: const EdgeInsets.only(bottom: 14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0A0E17),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF1F2937)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('ALKALMAZÁS', style: TextStyle(fontSize: 10, color: Color(0xFF6B7280), letterSpacing: 0.8)),
-                              const SizedBox(height: 4),
-                              Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    final update = await AppUpdateService.checkForUpdate();
-                                    if (!context.mounted) return;
-                                    if (update == null) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Nincs újabb verzió.')),
-                                      );
-                                      return;
-                                    }
-                                    Navigator.pop(context);
-                                    await showAppUpdateDialog(context, update);
-                                  },
-                                  icon: const Icon(Icons.system_update, size: 16),
-                                  label: const Text('Frissítés keresése', style: TextStyle(fontSize: 12)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                    const Text(
-                      'SportAPI.ai (X-Api-Key + ETag gyorsítótár)',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
-                    ),
-                    if (_rateLimitRemaining != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Maradék napi keret: $_rateLimitRemaining lekérés',
-                        style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
-                      ),
-                    ],
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: keyController,
-                      decoration: const InputDecoration(
-                        labelText: 'X-Api-Key (sk_live_...)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: baseController,
-                      decoration: const InputDecoration(
-                        labelText: 'Base URL',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: testing
-                                ? null
-                                : () async {
-                                    setDialogState(() => testing = true);
-                                    _apiKey = keyController.text.trim();
-                                    _baseUrl = baseController.text.trim();
-                                    await saveState();
-                                    final res = await syncSportApi(silent: true);
-                                    setDialogState(() {
-                                      testing = false;
-                                      if (res != null) {
-                                        testOutput = '${res.message}\n\n${res.rawPreview}';
-                                      } else {
-                                        testOutput = 'Adj meg egy API kulcsot a teszthez!';
-                                      }
-                                    });
-                                  },
-                            icon: testing
-                                ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.bolt, size: 16),
-                            label: const Text('API Teszt', style: TextStyle(fontSize: 11)),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              NotificationService.showAlert(
-                                99999,
-                                '⚽ GoalEdge AI Teszt Értesítés',
-                                'A valódi Android Push riasztások aktívak és működnek!',
-                              );
-                            },
-                            icon: const Icon(Icons.notifications_active, size: 16),
-                            label: const Text('Push Teszt', style: TextStyle(fontSize: 11)),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0A0E17),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF1F2937)),
-                      ),
-                      child: Text(
-                        testOutput,
-                        style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
-                      ),
-                    ),
-                    const Divider(height: 22, color: Color(0xFF1F2937)),
-                    const Text(
-                      'JSON Biztonsági Mentés (Újratelepítéshez)',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF3B82F6), fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          final jsonStr = _exportBackupJson();
-                          Clipboard.setData(ClipboardData(text: jsonStr));
-                        },
-                        icon: const Icon(Icons.copy, size: 15),
-                        label: const Text('Mentés másolása vágólapra', style: TextStyle(fontSize: 11)),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: backupController,
-                      maxLines: 2,
-                      decoration: const InputDecoration(
-                        labelText: 'JSON visszaállítás beillesztése...',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () async {
-                          final ok = await _importBackupJson(backupController.text);
-                          {
-                            if (ok) Navigator.pop(context);
-                          }
-                        },
-                        icon: const Icon(Icons.restore, size: 15),
-                        label: const Text('Adatok visszaállítása', style: TextStyle(fontSize: 11)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    
-                      _apiKey = '';
-                      _isLiveMode = false;
-                      _matches = _buildDemoMatches();
-                    
-    notifyListeners();
-                    saveState();
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Demó mód'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    
-                      _apiKey = keyController.text.trim();
-                      _baseUrl = baseController.text.trim();
-                    
-    notifyListeners();
-                    saveState();
-                    Navigator.pop(context);
-                    if (_apiKey.isNotEmpty) {
-                      syncSportApi();
-                    }
-                  },
-                  child: const Text('Mentés'),
-                ),
-              ],
-            );
-          },
-        );
+      apiKey: _apiKey,
+      baseUrl: _baseUrl,
+      lastApiStatus: _lastApiStatus,
+      rateLimitRemaining: _rateLimitRemaining,
+      onTestApi: ({bool silent = false}) => syncSportApi(silent: silent),
+      onExportBackup: _exportBackupJson,
+      onImportBackup: _importBackupJson,
+      onSave: (key, base) {
+        _apiKey = key;
+        _baseUrl = base;
+        notifyListeners();
+        saveState();
+        if (_apiKey.isNotEmpty) {
+          syncSportApi();
+        }
+      },
+      onDemoMode: () {
+        _apiKey = '';
+        _isLiveMode = false;
+        _matches = _buildDemoMatches();
+        notifyListeners();
+        saveState();
       },
     );
   }
