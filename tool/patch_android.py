@@ -15,59 +15,32 @@ for settings_path in ("android/settings.gradle.kts", "android/settings.gradle"):
     with open(settings_path, "r") as f:
         s = f.read()
 
-    # Ensure pluginManagement has google() + mavenCentral() + gradlePluginPortal()
+    # Force known-good pluginManagement repositories (google + mavenCentral + portal)
     if "pluginManagement" in s:
-        # Replace a minimal pluginManagement repositories block if only portal is present
-        if "google()" not in s or "mavenCentral()" not in s:
-            # Inject full repositories inside pluginManagement { repositories { ... } }
-            def fix_repos(match):
-                body = match.group(0)
-                if "google()" in body and "mavenCentral()" in body:
-                    return body
-                # Replace entire repositories { } inside the match with a known-good set
-                return re.sub(
-                    r"repositories\s*\{[^}]*\}",
-                    """repositories {
+        s = re.sub(
+            r"pluginManagement\s*\{[^}]*repositories\s*\{[^}]*\}",
+            """pluginManagement {
+    repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }""",
-                    body,
-                    count=1,
-                )
-
-            s2 = re.sub(
-                r"pluginManagement\s*\{.*?repositories\s*\{.*?\}\s*",
-                fix_repos,
-                s,
-                count=1,
-                flags=re.DOTALL,
-            )
-            if s2 != s:
-                s = s2
-            elif "pluginManagement" in s and "google()" not in s:
-                # Fallback: prepend repositories right after pluginManagement {
-                s = s.replace(
-                    "pluginManagement {",
-                    """pluginManagement {
+            s,
+            count=1,
+            flags=re.DOTALL,
+        )
+        # If the above didn't match nested structure, try broader replace of repositories only
+        if "google()" not in s:
+            s = s.replace(
+                "pluginManagement {",
+                """pluginManagement {
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }
 """,
-                    1,
-                )
-
-    # dependencyResolutionManagement repositories
-    if "dependencyResolutionManagement" in s:
-        if "google()" not in s.split("dependencyResolutionManagement")[-1][:500]:
-            s = re.sub(
-                r"(dependencyResolutionManagement\s*\{[^}]*repositories\s*\{)",
-                r"\1\n        google()\n        mavenCentral()\n",
-                s,
-                count=1,
-                flags=re.DOTALL,
+                1,
             )
 
     with open(settings_path, "w") as f:
@@ -75,7 +48,7 @@ for settings_path in ("android/settings.gradle.kts", "android/settings.gradle"):
     print(f"Patched {settings_path} repositories")
 
 # ---------------------------------------------------------------------------
-# Root build.gradle(.kts) – pin Kotlin if present / add google maven
+# Root build.gradle(.kts) – pin Kotlin to a resolvable version when explicit
 # ---------------------------------------------------------------------------
 for root_path in ("android/build.gradle.kts", "android/build.gradle"):
     if not os.path.exists(root_path):
@@ -83,8 +56,6 @@ for root_path in ("android/build.gradle.kts", "android/build.gradle"):
     with open(root_path, "r") as f:
         s = f.read()
 
-    # Prefer a stable Kotlin that resolves on Maven Central (avoid broken portal-only resolves)
-    # Only rewrite if an explicit kotlin version is set high / unknown.
     s = re.sub(
         r'(kotlin\s*=\s*")\d+\.\d+\.\d+(")',
         r"\g<1>2.1.0\2",
@@ -211,7 +182,6 @@ if os.path.exists(manifest):
             f.write(m)
         print("Manifest permissions OK")
 
-# Fail the job early if keystore was expected but signing block missing (optional safety)
 if has_keystore:
     app_gradle = None
     for p in ("android/app/build.gradle.kts", "android/app/build.gradle"):
