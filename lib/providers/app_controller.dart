@@ -17,6 +17,7 @@ import '../screens/matches/match_detail_widgets.dart';
 import '../screens/matches/match_detail_sheet.dart';
 import '../widgets/combo_slip_sheet.dart';
 import '../widgets/settings_dialog.dart';
+import '../widgets/bet_dialogs.dart';
 
 /// Central app state (refactored from monolithic MainNavigationScreen).
 class AppController extends ChangeNotifier {
@@ -663,157 +664,55 @@ class AppController extends ChangeNotifier {
   }
 
   void openEditOddsDialog(BuildContext context, MatchPick match) {
-    final controller = TextEditingController(text: match.marketOdds.toStringAsFixed(2));
-    showDialog(
+    BetDialogs.showEditOdds(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF131A29),
-          title: const Text('Saját bukmékeri szorzó', style: TextStyle(fontSize: 17)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('${match.homeTeam} – ${match.awayTeam}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              Text('Piac: ${match.market} (Modell: ${(match.modelProb * 100).round()}%)',
-                  style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Aktuális szorzó (pl. 1.95)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                
-                  _customOddsMap.remove(match.id);
-                  final fair = 1.0 / match.modelProb;
-                  match.marketOdds = double.parse((fair * 1.08).clamp(1.20, 5.20).toStringAsFixed(2));
-                  match.isCustomOdds = false;
-                
-    notifyListeners();
-                saveState();
-                Navigator.pop(context);
-              },
-              child: const Text('Alaphelyzet'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final parsed = double.tryParse(controller.text.replaceAll(',', '.'));
-                if (parsed != null && parsed >= 1.05 && parsed <= 50.0) {
-                  
-                    _customOddsMap[match.id] = parsed;
-                    match.marketOdds = parsed;
-                    match.isCustomOdds = true;
-                    match.oddsHistory.add(parsed);
-                  
-    notifyListeners();
-                  saveState();
-                }
-                Navigator.pop(context);
-              },
-              child: const Text('Alkalmaz'),
-            ),
-          ],
-        );
+      match: match,
+      onReset: () {
+        _customOddsMap.remove(match.id);
+        final fair = 1.0 / match.modelProb;
+        match.marketOdds = double.parse((fair * 1.08).clamp(1.20, 5.20).toStringAsFixed(2));
+        match.isCustomOdds = false;
+        notifyListeners();
+        saveState();
+      },
+      onApply: (parsed) {
+        if (parsed == null) return;
+        _customOddsMap[match.id] = parsed;
+        match.marketOdds = parsed;
+        match.isCustomOdds = true;
+        match.oddsHistory.add(parsed);
+        notifyListeners();
+        saveState();
       },
     );
   }
 
   void openEditClosingOddsDialog(BuildContext context, BetRecord bet) {
-    final controller = TextEditingController(
-      text: bet.closingOdds != null ? bet.closingOdds!.toStringAsFixed(2) : '',
-    );
-    showDialog(
+    BetDialogs.showEditClosingOdds(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF131A29),
-          title: const Text('Záró odds (CLV mérés)', style: TextStyle(fontSize: 17)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(bet.matchTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              Text('Megtett szorzó: ${bet.odds.toStringAsFixed(2)}',
-                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 12)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Kezdés előtti záró szorzó (pl. 1.72)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Mégse'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final parsed = double.tryParse(controller.text.replaceAll(',', '.'));
-                
-                  final idx = _bets.indexWhere((b) => b.id == bet.id);
-                  if (idx != -1) {
-                    _bets[idx] = BetRecord(
-                      id: bet.id,
-                      fixtureId: bet.fixtureId,
-                      league: bet.league,
-                      matchTitle: bet.matchTitle,
-                      market: bet.market,
-                      marketCode: bet.marketCode,
-                      marketCategory: bet.marketCategory,
-                      odds: bet.odds,
-                      closingOdds: parsed,
-                      modelProb: bet.modelProb,
-                      stake: bet.stake,
-                      status: bet.status,
-                      date: bet.date,
-                      note: bet.note,
-                    );
-                  }
-                
-    notifyListeners();
-                saveState();
-                Navigator.pop(context);
-              },
-              child: const Text('Mentés'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void openComboSlipSheet(BuildContext context) {
-    if (_slipItems.isEmpty) return;
-    ComboSlipSheet.show(
-      context: context,
-      slipItems: _slipItems,
-      bankroll: _bankroll,
-      onSlipChanged: (updated) {
-        _slipItems
-          ..clear()
-          ..addAll(updated);
-        notifyListeners();
-        saveState();
-      },
-      onLogComboBet: (bet) {
-        _bets.insert(0, bet);
-        _slipItems.clear();
-        notifyListeners();
-        saveState();
+      bet: bet,
+      onSave: (parsed) {
+        final idx = _bets.indexWhere((b) => b.id == bet.id);
+        if (idx != -1) {
+          _bets[idx] = BetRecord(
+            id: bet.id,
+            fixtureId: bet.fixtureId,
+            league: bet.league,
+            matchTitle: bet.matchTitle,
+            market: bet.market,
+            marketCode: bet.marketCode,
+            marketCategory: bet.marketCategory,
+            odds: bet.odds,
+            closingOdds: parsed,
+            modelProb: bet.modelProb,
+            stake: bet.stake,
+            status: bet.status,
+            date: bet.date,
+            note: bet.note,
+          );
+          notifyListeners();
+          saveState();
+        }
       },
     );
   }
@@ -947,77 +846,32 @@ class AppController extends ChangeNotifier {
   }
 
   void openLogBetDialog(BuildContext context, MatchPick match, {MarketOption? chosenMarket, String customLabel = '', double? customOddsVal, double? customProbVal}) {
-    final rec = match.recommendedStake(_bankroll, _stakeProfile);
-    double stake = (rec > 0 ? rec.toDouble() : _bankroll * 0.02).clamp(500, 50000).roundToDouble();
-    final label = customLabel.isNotEmpty ? customLabel : (chosenMarket?.label ?? match.market);
-    final odds = customOddsVal ?? chosenMarket?.refOdds ?? match.marketOdds;
-    final noteController = TextEditingController();
-
-    showDialog(
+    BetDialogs.showLogBet(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF131A29),
-              title: const Text('Tipp rögzítése a naplóba'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${match.homeTeam} – ${match.awayTeam}',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Text('$label @ $odds', style: const TextStyle(color: Color(0xFF10B981), fontSize: 13)),
-                    const SizedBox(height: 14),
-                    Text('Tét: ${stake.round()} Ft', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Slider(
-                      value: stake,
-                      min: 500,
-                      max: 50000,
-                      divisions: 99,
-                      activeColor: const Color(0xFF10B981),
-                      onChanged: (v) => setDialogState(() => stake = v),
-                    ),
-                    Text(
-                      'Várható nyeremény: ${(stake * odds).round()} Ft',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: noteController,
-                      decoration: const InputDecoration(
-                        labelText: 'Elemző jegyzet (opcionális)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Mégse'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    addBet(
-                      match,
-                      stake,
-                      chosenMarket: chosenMarket,
-                      customLabel: customLabel,
-                      customOddsVal: customOddsVal,
-                      customProbVal: customProbVal,
-                      note: noteController.text.trim(),
-                    );
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Rögzítés'),
-                ),
-              ],
-            );
-          },
+      match: match,
+      bankroll: _bankroll,
+      stakeProfile: _stakeProfile,
+      chosenMarket: chosenMarket,
+      customLabel: customLabel,
+      customOddsVal: customOddsVal,
+      customProbVal: customProbVal,
+      onConfirm: ({
+        required MatchPick match,
+        required double stake,
+        MarketOption? chosenMarket,
+        String customLabel = '',
+        double? customOddsVal,
+        double? customProbVal,
+        String note = '',
+      }) {
+        addBet(
+          match,
+          stake,
+          chosenMarket: chosenMarket,
+          customLabel: customLabel,
+          customOddsVal: customOddsVal,
+          customProbVal: customProbVal,
+          note: note,
         );
       },
     );
