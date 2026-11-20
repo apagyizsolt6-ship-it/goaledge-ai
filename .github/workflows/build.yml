@@ -22,8 +22,6 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          # Pin if CI suddenly breaks on latest stable; remove comment to lock:
-          # flutter-version: "3.27.4"
           cache: true
 
       - name: Flutter android scaffold
@@ -53,6 +51,10 @@ jobs:
             > android/key.properties
           echo "HAS_KEYSTORE=true" >> "$GITHUB_ENV"
           echo "Keystore OK"
+          # Print keystore cert fingerprint for comparison across builds
+          keytool -list -v -keystore android/app/upload-keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null \
+            | grep -E "SHA256:|Alias name:|Valid from:" || true
 
       - name: Patch android gradle and manifest
         env:
@@ -62,15 +64,33 @@ jobs:
       - name: Show android settings (debug)
         run: |
           echo "===== settings.gradle.kts ====="
-          head -40 android/settings.gradle.kts 2>/dev/null || head -40 android/settings.gradle
-          echo "===== app build.gradle ====="
-          head -80 android/app/build.gradle.kts 2>/dev/null || head -80 android/app/build.gradle
+          head -50 android/settings.gradle.kts 2>/dev/null || head -50 android/settings.gradle
+          echo "===== app build.gradle (signing-related) ====="
+          grep -n -i "signing\|release\|keystore\|storeFile\|applicationId\|versionCode" \
+            android/app/build.gradle.kts 2>/dev/null \
+            || grep -n -i "signing\|release\|keystore\|storeFile\|applicationId\|versionCode" \
+            android/app/build.gradle
 
       - name: Flutter pub get
         run: flutter pub get
 
       - name: Build release APK
         run: flutter build apk --release
+
+      - name: Verify APK signature
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          echo "APK: $APK"
+          ls -lh "$APK"
+          # Prefer apksigner from Android SDK build-tools
+          AS=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$AS" ]; then
+            echo "Using $AS"
+            "$AS" verify --print-certs "$APK" || true
+          else
+            echo "apksigner not found, trying jarsigner"
+            jarsigner -verify -verbose -certs "$APK" 2>/dev/null | head -40 || true
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
