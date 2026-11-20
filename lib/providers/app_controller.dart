@@ -816,6 +816,28 @@ class AppController extends ChangeNotifier {
     saveState();
   }
 
+  void openComboSlipSheet(BuildContext context) {
+    if (_slipItems.isEmpty) return;
+    ComboSlipSheet.show(
+      context: context,
+      slipItems: _slipItems,
+      bankroll: _bankroll,
+      onSlipChanged: (updated) {
+        _slipItems
+          ..clear()
+          ..addAll(updated);
+        notifyListeners();
+        saveState();
+      },
+      onLogComboBet: (bet) {
+        _bets.insert(0, bet);
+        _slipItems.clear();
+        notifyListeners();
+        saveState();
+      },
+    );
+  }
+
   void openSettingsDialog(BuildContext context) {
     SettingsDialog.show(
       context: context,
